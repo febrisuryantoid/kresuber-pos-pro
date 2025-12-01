@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       Sistem Kasir (POS) Modern v1.7.0. Sinkronisasi penuh WooCommerce, HPOS Ready, dan UI Responsif.
- * Version:           1.7.0
+ * Description:       Sistem Kasir (POS) Modern v1.8.0. Performa Tinggi, Sinkronisasi Stok Real-time, dan Kompatibel WC 9.0+.
+ * Version:           1.8.0
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
@@ -21,11 +21,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define Constants
-define( 'KRESUBER_POS_PRO_VERSION', '1.7.0' );
+define( 'KRESUBER_POS_PRO_VERSION', '1.8.0' );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
-// Autoloader (Diperbaiki untuk Windows & Stabilitas)
+// Autoloader (Diperbaiki untuk Windows & Stabilitas Linux)
 spl_autoload_register( function ( $class ) {
     $prefix = 'Kresuber\\POS_Pro\\';
     $base_dir = KRESUBER_POS_PRO_PATH . 'includes/';
@@ -39,11 +39,10 @@ spl_autoload_register( function ( $class ) {
     // Ambil nama relatif class
     $relative_class = substr( $class, $len );
     
-    // Mapping ke file path
-    // Menggunakan DIRECTORY_SEPARATOR agar aman di Windows (D:\...) maupun Linux
+    // Mapping ke file path (PSR-4 Standard)
     $file = $base_dir . str_replace( '\\', DIRECTORY_SEPARATOR, $relative_class ) . '.php';
     
-    // Jika file ada, require. Jika tidak, jangan error dulu (biarkan autoload lain mencoba)
+    // Jika file ada, require.
     if ( file_exists( $file ) ) {
         require_once $file;
     }
@@ -64,10 +63,10 @@ class Main {
 
     public function __construct() {
         add_action( 'plugins_loaded', [ $this, 'load_i18n' ] );
-        add_action( 'plugins_loaded', [ $this, 'init_updater' ] ); // Init Updater
+        add_action( 'plugins_loaded', [ $this, 'init_updater' ] );
         $this->init_hooks();
         
-        // Auto-fix Rewrite Rules jika belum ada
+        // Auto-fix Rewrite Rules jika belum ada saat admin dimuat
         add_action( 'admin_init', [ $this, 'check_rewrite_rules' ] );
     }
 
@@ -80,17 +79,15 @@ class Main {
     }
 
     public function init_updater() {
-        // Inisialisasi GitHub Updater
-        // Pastikan Anda membuat Release/Tag di GitHub (misal v1.7.1) agar terdeteksi
         if ( class_exists( 'Kresuber\\POS_Pro\\Core\\Updater' ) ) {
+            // Pastikan repo path sesuai dengan konfigurasi Anda
             new Core\Updater( __FILE__, 'febrisuryantoid/kresuber-pos-pro' );
         }
     }
 
     private function init_hooks() {
         // 1. Admin Area
-        // Cek dulu apakah class ada sebelum dipanggil untuk menghindari Fatal Error
-        if ( class_exists( 'Kresuber\\POS_Pro\\Admin\\Admin' ) ) {
+        if ( is_admin() && class_exists( 'Kresuber\\POS_Pro\\Admin\\Admin' ) ) {
             $admin = new Admin\Admin();
             add_action( 'admin_menu', [ $admin, 'register_menu' ] );
             add_action( 'admin_enqueue_scripts', [ $admin, 'enqueue_styles' ] );
@@ -121,7 +118,7 @@ class Main {
     }
 }
 
-// Activation Hooks
+// Activation & Deactivation Hooks
 register_activation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Activator', 'activate' ] );
 register_deactivation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Deactivator', 'deactivate' ] );
 

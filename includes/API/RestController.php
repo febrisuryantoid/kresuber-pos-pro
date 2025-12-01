@@ -1,97 +1,256 @@
 <?php
-namespace Kresuber\POS_Pro\Frontend;
+namespace Kresuber\POS_Pro\API;
 
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-class UI {
+class RestController {
 
     /**
-     * Menambahkan Rewrite Rule untuk endpoint /pos/
+     * Register Routes
      */
-    public function add_rewrite_rules() {
-        add_rewrite_rule( '^pos/?$', 'index.php?kresuber_pos=1', 'top' );
+    public function register_routes() {
+        $namespace = 'kresuber-pos/v1';
+
+        // 1. Health Check (Ping)
+        register_rest_route( $namespace, '/health', [
+            'methods'             => 'GET',
+            'callback'            => [ $this, 'health_check' ],
+            'permission_callback' => [ $this, 'check_permission' ]
+        ]);
+
+        // 2. Get Products (Paginated)
+        register_rest_route( $namespace, '/products', [
+            'methods'             => 'GET',
+            'callback'            => [ $this, 'get_products' ],
+            'permission_callback' => [ $this, 'check_permission' ],
+            'args'                => [
+                'page' => [
+                    'default'           => 1,
+                    'sanitize_callback' => 'absint',
+                ],
+                'per_page' => [
+                    'default'           => 50, // Default batch size
+                    'sanitize_callback' => 'absint',
+                ]
+            ]
+        ]);
+
+        // 3. Create Order
+        register_rest_route( $namespace, '/order', [
+            'methods'             => 'POST',
+            'callback'            => [ $this, 'create_order' ],
+            'permission_callback' => [ $this, 'check_permission' ]
+        ]);
+        
+        // 4. Get Recent Orders
+        register_rest_route( $namespace, '/orders', [
+            'methods'             => 'GET',
+            'callback'            => [ $this, 'get_recent_orders' ],
+            'permission_callback' => [ $this, 'check_permission' ]
+        ]);
     }
 
     /**
-     * Mendaftarkan query var agar WordPress mengenali parameter URL
+     * Permission Callback
+     * Hanya Admin & Shop Manager
      */
-    public function add_query_vars( $vars ) {
-        $vars[] = 'kresuber_pos';
-        return $vars;
+    public function check_permission() {
+        return current_user_can( 'manage_woocommerce' ) || current_user_can( 'edit_shop_orders' );
     }
 
     /**
-     * Menangani logika loading aplikasi POS
-     * Menggunakan prioritas 1 agar dieksekusi sebelum redirect lain
+     * Health Check Endpoint
      */
-    public function load_pos_app() {
-        global $wp_query;
+    public function health_check() {
+        return rest_ensure_response([
+            'status' => 'ok', 
+            'version' => KRESUBER_POS_PRO_VERSION,
+            'time' => time()
+        ]);
+    }
 
-        // 1. Deteksi Standar via Query Var (Ideal)
-        $is_pos = get_query_var( 'kresuber_pos' ) == 1;
+    /**
+     * Get Products with Pagination
+     */
+    public function get_products( $request ) {
+        $page = $request->get_param( 'page' );
+        $limit = $request->get_param( 'per_page' );
 
-        // 2. Deteksi Fallback via URI (Jika Rewrite Rule macet)
-        if ( ! $is_pos && isset( $_SERVER['REQUEST_URI'] ) ) {
-            $path = parse_url( $_SERVER['REQUEST_URI'], PHP_URL_PATH );
-            // Cek jika URL berakhiran /pos atau /pos/
-            if ( preg_match( '#/pos/?$#i', $path ) ) {
-                $is_pos = true;
-            }
-        }
+        // Query WooCommerce standar yang aman
+        $args = [
+            'limit'    => $limit,
+            'page'     => $page,
+            'status'   => 'publish',
+            'paginate' => true, // Return object with total/max_num_pages
+        ];
+        
+        $results = wc_get_products( $args );
+        
+        $products = [];
+        $wc_products = $results->products;
 
-        if ( $is_pos ) {
-            // Stop cache headers untuk halaman App
-            if ( ! headers_sent() ) {
-                nocache_headers();
-            }
-
-            // Cek Permission: Hanya Admin & Shop Manager
-            if ( ! current_user_can( 'manage_woocommerce' ) && ! current_user_can( 'edit_shop_orders' ) ) {
-                $login_url = wp_login_url( home_url( '/pos' ) );
-                if ( headers_sent() ) {
-                    echo "<meta http-equiv='refresh' content='0;url=$login_url'>";
-                    exit;
-                } else {
-                    wp_redirect( $login_url );
-                    exit;
+        foreach ( $wc_products as $product ) {
+            // Optimasi gambar
+            $image_id = $product->get_image_id();
+            $image_url = $image_id ? wp_get_attachment_image_url( $image_id, 'medium' ) : wc_placeholder_img_src();
+            
+            // Kategori
+            $cats = $product->get_category_ids();
+            $cat_slug = 'uncategorized';
+            $cat_name = 'Lainnya';
+            
+            if ( ! empty( $cats ) ) {
+                $term = get_term( $cats[0], 'product_cat' );
+                if ( $term && ! is_wp_error( $term ) ) {
+                    $cat_slug = $term->slug;
+                    $cat_name = $term->name;
                 }
             }
 
-            // Persiapkan Variabel Config untuk View
-            $themes = [
-                'retail'    => '#00A78E', 
-                'grosir'    => '#0B5FFF', 
-                'sembako'   => '#F59E0B',
-                'kelontong' => '#7C4DFF', 
-                'sayur'     => '#10B981', 
-                'buah'      => '#FF6B6B'
-            ];
-            
-            $theme_key = get_option( 'kresuber_pos_theme', 'retail' );
-            $site_name = get_bloginfo( 'name' );
-            
-            // Konfigurasi JS (Global Variable)
-            $kresuber_config = [
-                'logo'          => get_option( 'kresuber_pos_logo', '' ),
-                'qris'          => get_option( 'kresuber_qris_image', '' ),
-                'printer_width' => get_option( 'kresuber_printer_width', '58mm' ),
-                'cashiers'      => json_decode( get_option( 'kresuber_cashiers', '[]' ) ) ?: ['Kasir 1'],
-                'theme_color'   => $themes[ $theme_key ] ?? '#00A78E',
-                'site_name'     => $site_name,
-                'ajax_url'      => admin_url( 'admin-ajax.php' ), // Cadangan jika butuh
-            ];
+            // Variasi harga (jika ada)
+            $price = (float) $product->get_price();
+            $regular = (float) $product->get_regular_price();
 
-            // Load Template
-            $template_path = KRESUBER_POS_PRO_PATH . 'templates/app.php';
-            
-            if ( file_exists( $template_path ) ) {
-                include $template_path;
-                exit;
-            } else {
-                wp_die( 'Error: File template POS (app.php) tidak ditemukan. Silakan instal ulang plugin.' );
-            }
+            $products[] = [
+                'id'            => $product->get_id(),
+                'name'          => $product->get_name(),
+                'price'         => $price,
+                'regular_price' => $regular > 0 ? $regular : $price,
+                'image'         => $image_url,
+                'stock'         => $product->get_stock_quantity() ?? 9999,
+                'sku'           => (string) $product->get_sku(),
+                'barcode'       => (string) $product->get_meta( '_barcode' ), // Kompatibilitas barcode custom
+                'category_slug' => $cat_slug,
+                'category_name' => $cat_name
+            ];
         }
+
+        return rest_ensure_response([
+            'products' => $products,
+            'pagination' => [
+                'total_items' => $results->total,
+                'total_pages' => $results->max_num_pages,
+                'current_page' => $page
+            ]
+        ]);
+    }
+
+    /**
+     * Create Order Atomic
+     */
+    public function create_order( $request ) {
+        $params = $request->get_json_params();
+        
+        if ( empty( $params['items'] ) ) {
+            return new \WP_Error( 'no_items', 'Keranjang belanja kosong.', [ 'status' => 400 ] );
+        }
+
+        $items = $params['items'];
+        $payment_method = sanitize_text_field( $params['payment_method'] ?? 'cash' );
+        $amount_tendered = floatval( $params['amount_tendered'] ?? 0 );
+        $change = floatval( $params['change'] ?? 0 );
+        $cashier_name = sanitize_text_field( $params['cashier'] ?? 'Kasir' );
+
+        try {
+            // Gunakan WC_Order factory
+            $order = wc_create_order();
+            
+            foreach ( $items as $item ) {
+                $product_id = absint( $item['id'] );
+                $qty = absint( $item['qty'] );
+                
+                $product = wc_get_product( $product_id );
+                
+                if ( ! $product ) continue;
+
+                // Cek Stok Real-time sebelum add
+                if ( $product->managing_stock() && ! $product->is_in_stock() ) {
+                    throw new \Exception( "Stok produk {$product->get_name()} habis saat checkout." );
+                }
+
+                // Add product to order (ini otomatis trigger hold stock di Woo modern)
+                $item_id = $order->add_product( $product, $qty );
+                
+                if ( ! $item_id ) {
+                    throw new \Exception( "Gagal menambahkan produk {$product->get_name()} ke pesanan." );
+                }
+            }
+
+            // Set Billing Data (POS Generic)
+            $address = [
+                'first_name' => 'POS Walk-in',
+                'last_name'  => 'Customer',
+                'email'      => 'pos@local.store',
+                'phone'      => '',
+                'address_1'  => 'Toko Fisik',
+                'city'       => '',
+                'state'      => '',
+                'postcode'   => '',
+                'country'    => 'ID'
+            ];
+            
+            $order->set_address( $address, 'billing' );
+            $order->set_address( $address, 'shipping' );
+
+            // Payment Details
+            $order->set_payment_method( $payment_method );
+            $order->set_payment_method_title( ucfirst( $payment_method ) );
+            $order->set_customer_note( "Kasir: $cashier_name" );
+            
+            // Simpan detail pembayaran di meta
+            $order->update_meta_data( '_pos_amount_tendered', $amount_tendered );
+            $order->update_meta_data( '_pos_change', $change );
+            $order->update_meta_data( '_pos_cashier', $cashier_name );
+            $order->update_meta_data( '_created_via', 'kresuber_pos' );
+
+            // Kalkulasi Total
+            $order->calculate_totals();
+            
+            // Selesaikan Order (Ini akan mengurangi stok secara permanen)
+            $order->payment_complete(); 
+            
+            // Opsional: Langsung ubah ke Completed agar masuk laporan penjualan hari ini
+            $order->update_status( 'completed', "Order POS dibuat oleh $cashier_name. Tunai: " . wc_price($amount_tendered) );
+
+            return rest_ensure_response([
+                'success'      => true,
+                'order_id'     => $order->get_id(),
+                'number'       => $order->get_order_number(),
+                'total'        => $order->get_total(),
+                'date'         => $order->get_date_created()->date( 'd M Y H:i' ),
+                'cashier'      => $cashier_name
+            ]);
+
+        } catch ( \Exception $e ) {
+            return new \WP_Error( 'create_order_failed', $e->getMessage(), [ 'status' => 500 ] );
+        }
+    }
+
+    /**
+     * Get Recent Orders
+     */
+    public function get_recent_orders() {
+        $orders = wc_get_orders([
+            'limit' => 10,
+            'orderby' => 'date',
+            'order' => 'DESC',
+            'meta_key' => '_created_via',
+            'meta_value' => 'kresuber_pos'
+        ]);
+
+        $data = [];
+        foreach($orders as $order) {
+            $data[] = [
+                'id' => $order->get_id(),
+                'number' => $order->get_order_number(),
+                'date' => $order->get_date_created()->date( 'd/m H:i' ),
+                'total_formatted' => $order->get_formatted_order_total(),
+                'status' => wc_get_order_status_name( $order->get_status() )
+            ];
+        }
+
+        return rest_ensure_response($data);
     }
 }
