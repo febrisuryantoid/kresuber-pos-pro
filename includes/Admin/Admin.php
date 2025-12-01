@@ -129,9 +129,11 @@ class Admin {
                             <div class="k-card-body">
                                 <label class="k-label">Daftar Nama Kasir</label>
                                 <p class="k-hint">Pisahkan dengan koma (contoh: Budi, Siti).</p>
-                                <?php $c_str = implode(', ', $cashiers); ?>
+                                <?php $c_str = implode(', ', $cashiers); 
+                                      $json_cashiers = get_option('kresuber_cashiers', '[]');
+                                ?>
                                 <textarea id="cashier_input" class="k-textarea" rows="5"><?php echo esc_textarea($c_str); ?></textarea>
-                                <input type="hidden" name="kresuber_cashiers" id="kresuber_cashiers_json" value="<?php echo esc_attr($cashiers_json); ?>">
+                                <input type="hidden" name="kresuber_cashiers" id="kresuber_cashiers_json" value="<?php echo esc_attr($json_cashiers); ?>">
                             </div>
                             <div class="k-card-foot">
                                 <?php submit_button('Simpan', 'primary w-full', 'submit', false); ?>

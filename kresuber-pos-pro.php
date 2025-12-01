@@ -17,7 +17,7 @@ namespace Kresuber\POS_Pro;
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'KRESUBER_POS_PRO_VERSION', '1.7.1' );
+define( 'KRESUBER_POS_PRO_VERSION', '1.7.2' );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
