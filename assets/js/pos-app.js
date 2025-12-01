@@ -5,11 +5,8 @@ db.version(1).stores({ prod: "id, sku, barcode, cat, search" });
 
 createApp({
     setup() {
-        const config = ref(params.conf||{});
-        const products = ref([]); const categories = ref([]); const cart = ref([]); const orders = ref([]);
-        const curCat = ref('all'); const search = ref(''); 
-        // Unified Status Object for clearer debugging
-        const status = ref({ loading: true, syncing: false, health: 'checking' });
+        const config=ref(params.conf||{}), prod=ref([]), cat=ref([]), cart=ref([]), orders=ref([]);
+        const curCat=ref('all'), search=ref(''), loading=ref(false), syncing=ref(false);
         const viewMode=ref('pos'), showCart=ref(false), modal=ref(false);
         const method=ref('cash'), paid=ref(''), processing=ref(false), cashInput=ref(null), receipt=ref({});
 
@@ -17,24 +14,18 @@ createApp({
         const change = computed(() => (parseInt(paid.value)||0)-total.value);
         const fmt = (v) => params.curr + ' ' + new Intl.NumberFormat('id-ID').format(v);
 
-        // 1. Force Remove Loader Immediately
-        const forceUnblockUI = () => {
-            const l = document.getElementById('app-loading');
-            if(l) { l.style.opacity='0'; setTimeout(()=>l.style.display='none', 300); }
-        };
+        const stopLoad = () => { const l=document.getElementById('app-loading'); if(l){l.style.opacity='0'; setTimeout(()=>l.style.display='none',500);} };
 
-        // 2. Sync Process (Background)
         const sync = async () => {
-            status.value.syncing = true;
+            syncing.value=true; loading.value=true;
             try {
                 const r = await axios.get(`${params.api}/products`, {headers:{'X-WP-Nonce':params.nonce}});
                 const items = r.data.map(p => ({...p, search:`${p.name} ${p.sku} ${p.barcode}`.toLowerCase(), cat:p.category_slug}));
                 const cats = {}; items.forEach(i => cats[i.cat]={slug:i.cat, name:i.category_name});
-                categories.value = Object.values(cats);
+                cat.value = Object.values(cats);
                 await db.prod.clear(); await db.prod.bulkAdd(items);
                 find();
-            } catch(e){ console.error("Sync error", e); } 
-            finally { status.value.syncing = false; status.value.loading = false; }
+            } catch(e){ alert("Sync Gagal"); } finally { syncing.value=false; loading.value=false; }
         };
 
         const find = async () => {
@@ -45,18 +36,20 @@ createApp({
                 const ex = await db.prod.where('sku').equals(q).or('barcode').equals(q).first();
                 if(ex) { add(ex); search.value=''; return; }
                 const all = await c.toArray();
-                products.value = all.filter(p => p.search.includes(q)).slice(0,50);
-            } else { products.value = await c.limit(50).toArray(); }
+                prod.value = all.filter(p => p.search.includes(q)).slice(0,50);
+            } else { prod.value = await c.limit(50).toArray(); }
             
-            if(!categories.value.length && products.value.length) {
+            // Fallback cat load
+            if(!cat.value.length && prod.value.length) {
                  const all = await db.prod.toArray(); const cats = {}; all.forEach(i => cats[i.cat]={slug:i.cat, name:i.category_name});
-                 categories.value = Object.values(cats);
+                 cat.value = Object.values(cats);
             }
         };
 
         const fetchOrders = async () => {
+            loading.value=true; 
             try { const r=await axios.get(`${params.api}/orders`, {headers:{'X-WP-Nonce':params.nonce}}); orders.value=r.data; }
-            catch(e){}
+            catch(e){} finally{ loading.value=false; }
         };
 
         const add = (p) => { 
@@ -66,7 +59,7 @@ createApp({
         const rem = (i) => cart.value = cart.value.filter(x=>x.id!==i.id);
         const qty = (i,d) => { i.qty+=d; if(i.qty<=0) rem(i); };
         const clearCart = () => confirm('Hapus?') ? cart.value=[] : null;
-        const toggleHold = () => { /* same hold logic */ };
+        const toggleHold = () => {}; // Placeholder
 
         const checkout = async () => {
             processing.value=true;
@@ -88,31 +81,15 @@ createApp({
         const setCategory = (s) => { curCat.value=s; find(); };
 
         onMounted(async () => {
-            // UNBLOCK UI IMMEDIATELY
-            forceUnblockUI();
-
-            // ASYNC INIT
-            try {
-                // Check DB existence
-                const c = await db.prod.count();
-                if(c === 0) {
-                     // If empty, trigger sync but don't block
-                     sync();
-                } else {
-                     // Load local data immediately
-                     await find();
-                     status.value.loading = false;
-                }
-            } catch(e) { 
-                console.error("Init Error", e); 
-                status.value.loading = false; // Ensure spinner stops on error
-            }
+            try { if((await db.prod.count())===0) await sync(); else await find(); } 
+            catch(e){ console.error(e); } 
+            finally { stopLoad(); }
             window.addEventListener('keydown', e => { if(e.key==='F3'){ e.preventDefault(); document.querySelector('input[type=text]')?.focus(); } });
         });
 
         watch([search, curCat], find);
         watch(modal, (v) => { if(v && method.value==='cash') nextTick(()=>cashInput.value?.focus()); });
 
-        return { config, products, categories, cart, orders, currentCategory:curCat, searchQuery:search, status, syncing, showCart, modal, method, paid, processing, cashInput, total, change, fmt, sync, setCategory, fetchOrders, add, rem, qty, clearCart, checkout, receipt, toggleHold };
+        return { config, products:prod, categories:cat, cart, orders, currentCategory:curCat, searchQuery:search, loading, syncing, showCart, modal, method, paid, processing, cashInput, total, change, fmt, sync, setCategory, fetchOrders, add, rem, qty, clearCart, checkout, receipt, toggleHold };
     }
 }).mount('#app');

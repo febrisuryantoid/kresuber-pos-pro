@@ -1,3 +1,3 @@
 === Kresuber POS Pro ===
-Stable tag: 1.7.0
+Stable tag: 3.0.1
 Description: POS System for WooCommerce.

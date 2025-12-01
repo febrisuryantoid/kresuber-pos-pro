@@ -4,7 +4,7 @@ namespace Kresuber\POS_Pro\Admin;
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 class Admin {
-    private $version = '1.7.0';
+    private $version = '3.0.1';
 
     public function register_settings() {
         register_setting( 'kresuber_pos_settings', 'kresuber_pos_logo' );
@@ -30,15 +30,13 @@ class Admin {
         $cashiers = json_decode($cashiers_json) ?: [];
         ?>
         <div class="wrap kresuber-wrap">
-            <h1>Kresuber POS Pro <small>v1.7.0</small></h1>
+            <h1>Kresuber POS Pro <small>v3.0.1</small></h1>
             <?php settings_errors(); ?>
             <div class="k-grid">
                 <div class="k-card">
                     <h2>Status & Akses</h2>
                     <p>Aplikasi POS siap digunakan.</p>
                     <a href="<?php echo home_url('/pos'); ?>" target="_blank" class="button button-primary button-hero">Buka Aplikasi Kasir</a>
-                    <hr>
-                    <p><small>Jika POS macet saat loading, coba "Hard Refresh" (Ctrl+F5).</small></p>
                 </div>
                 <div class="k-card">
                     <form method="post" action="options.php">

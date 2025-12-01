@@ -1,7 +1,6 @@
 <?php
 namespace Kresuber\POS_Pro\API;
 use WP_Error, WP_REST_Controller, WP_REST_Server;
-use Kresuber\POS_Pro\Core\Logger;
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
@@ -12,21 +11,11 @@ class RestController extends WP_REST_Controller {
         register_rest_route( $this->namespace, '/products', [ 'methods' => 'GET', 'callback' => [ $this, 'get_products' ], 'permission_callback' => [ $this, 'perm' ] ] );
         register_rest_route( $this->namespace, '/orders', [ 'methods' => 'GET', 'callback' => [ $this, 'get_orders' ], 'permission_callback' => [ $this, 'perm' ] ] );
         register_rest_route( $this->namespace, '/order', [ 'methods' => 'POST', 'callback' => [ $this, 'create_order' ], 'permission_callback' => [ $this, 'perm' ] ] );
-        register_rest_route( $this->namespace, '/health', [ 'methods' => 'GET', 'callback' => [ $this, 'get_health' ], 'permission_callback' => '__return_true' ] );
     }
 
     public function perm() { return current_user_can('manage_woocommerce'); }
 
-    public function get_health() {
-        return rest_ensure_response([
-            'status' => 'ok',
-            'db' => 'connected',
-            'time' => time()
-        ]);
-    }
-
     public function get_products($r) {
-        Logger::log("Fetching products started");
         $products = wc_get_products(['limit' => -1, 'status' => 'publish']);
         $data = [];
         foreach($products as $p) {
@@ -41,7 +30,6 @@ class RestController extends WP_REST_Controller {
                 'category_slug'=>$c_slug, 'category_name'=>$c_name
             ];
         }
-        Logger::log("Fetching products done. Count: " + count($data));
         return rest_ensure_response($data);
     }
 
@@ -67,6 +55,8 @@ class RestController extends WP_REST_Controller {
             $order->set_payment_method($p['payment_method']??'cash');
             $order->calculate_totals(); $order->payment_complete();
             return rest_ensure_response(['success'=>true, 'order_number'=>$order->get_order_number(), 'total'=>$order->get_total(), 'date'=>$order->get_date_created()->date('d M Y H:i')]);
-        } catch(\Exception $e) { return new WP_Error('err', $e->getMessage()); }
+        } catch( \Exception $e ) { 
+            return new WP_Error('err', $e->getMessage()); 
+        }
     }
 }

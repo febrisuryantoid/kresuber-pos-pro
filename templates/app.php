@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-    <title>Kresuber POS v1.7</title>
+    <title>Kresuber POS v3.0.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/remixicon@4.5.0/fonts/remixicon.css" rel="stylesheet">
     <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.min.js"></script>
@@ -11,18 +11,24 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="<?php echo KRESUBER_POS_PRO_URL; ?>assets/css/pos-style.css">
     <style>
-        #app-loading { position: fixed; inset: 0; background: #fff; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.3s; }
+        #app-loading { position: fixed; inset: 0; background: #f8fafc; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.5s; }
         [v-cloak] { display: none !important; }
         :root { --print-width: <?php global $kresuber_config; echo $kresuber_config['printer_width']; ?>; }
     </style>
 </head>
 <body class="bg-gray-50 h-screen overflow-hidden text-slate-800 font-sans">
     
-    <!-- PRELOADER (Shell Only) -->
+    <!-- LOADING SCREEN (FAILSAFE) -->
     <div id="app-loading">
         <div class="mb-4 text-blue-600 animate-bounce"><i class="ri-store-3-fill text-6xl"></i></div>
-        <h2 class="text-xl font-bold">Memuat Kasir...</h2>
-        <p class="text-sm text-gray-400 mt-2">Menghubungkan ke database lokal...</p>
+        <h2 class="text-xl font-bold text-slate-700">Memuat Kasir...</h2>
+        <p id="loading-msg" class="text-sm text-gray-400 mt-2">Menyiapkan Database...</p>
+        
+        <!-- AUTO-ERROR MESSAGE IF STUCK -->
+        <div id="loading-error" class="hidden mt-4 text-red-500 text-sm text-center">
+            <i class="ri-error-warning-line text-2xl"></i><br>
+            Gagal memuat aplikasi.<br>Silakan Refresh halaman.
+        </div>
     </div>
 
     <div id="app" v-cloak class="flex h-full w-full flex-col md:flex-row">
@@ -32,7 +38,7 @@
                 <img v-if="config.logo" :src="config.logo" class="h-8 max-w-[120px] object-contain">
                 <span v-else class="font-bold text-lg text-blue-600">Kresuber</span>
             </div>
-            <button @click="showCart=!showCart" class="relative p-2"><i class="ri-shopping-basket-fill text-2xl"></i><span v-if="cart.length" class="absolute top-0 right-0 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{{cart.length}}</span></button>
+            <button @click="showCart=!showCart" class="relative p-2"><i class="ri-shopping-basket-fill text-2xl text-slate-700"></i><span v-if="cart.length" class="absolute top-0 right-0 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">{{cart.length}}</span></button>
         </div>
         <div class="flex-1 flex flex-col h-full bg-white relative">
             <!-- Header -->
@@ -46,11 +52,7 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-4">
-                    <!-- Health Status Indicator -->
-                    <span v-if="status.syncing" class="text-xs text-orange-500 animate-pulse font-bold">Syncing...</span>
-                    <span v-else class="text-xs text-green-500 font-bold">Ready</span>
-                    
-                    <button @click="sync" :disabled="status.syncing" class="p-2 hover:bg-gray-100 rounded-full"><i class="ri-refresh-line text-lg"></i></button>
+                    <button @click="sync" :class="{'animate-spin':syncing}" class="p-2 hover:bg-gray-100 rounded-full"><i class="ri-refresh-line text-lg"></i></button>
                     <button @click="viewMode='orders';fetchOrders()" class="px-3 py-1 bg-gray-100 rounded font-bold hover:bg-gray-200">Orders</button>
                     <a href="<?php echo esc_url(admin_url()); ?>" class="text-gray-400 hover:text-red-500"><i class="ri-logout-box-r-line text-xl"></i></a>
                 </div>
@@ -58,17 +60,13 @@
             
             <!-- Chips -->
             <div class="px-4 py-2 border-b bg-white overflow-x-auto whitespace-nowrap no-scrollbar shadow-sm z-20 shrink-0">
-                <button @click="cat='all'" :class="cat==='all'?'bg-slate-800 text-white':'bg-gray-100'" class="px-4 py-1.5 rounded-full text-xs font-bold mr-2 transition">Semua</button>
-                <button v-for="c in categories" :key="c.slug" @click="cat=c.slug" :class="cat===c.slug?'bg-blue-600 text-white':'bg-gray-100'" class="px-4 py-1.5 rounded-full text-xs font-bold mr-2 transition">{{c.name}}</button>
+                <button @click="setCategory('all')" :class="currentCategory==='all'?'bg-slate-800 text-white':'bg-gray-100'" class="px-4 py-1.5 rounded-full text-xs font-bold mr-2 transition">Semua</button>
+                <button v-for="c in categories" :key="c.slug" @click="setCategory(c.slug)" :class="currentCategory===c.slug?'bg-blue-600 text-white':'bg-gray-100'" class="px-4 py-1.5 rounded-full text-xs font-bold mr-2 transition">{{c.name}}</button>
             </div>
 
             <!-- Product Grid -->
             <div v-if="viewMode==='pos'" class="flex-1 overflow-y-auto p-4 bg-slate-50">
-                <div v-if="status.loading" class="text-center pt-20 text-gray-400">Memuat Produk...</div>
-                <div v-else-if="products.length===0" class="text-center pt-20 text-gray-400">
-                    <i class="ri-inbox-line text-4xl"></i><br>Tidak ada produk.<br>
-                    <button @click="sync" class="text-blue-600 underline mt-2 text-sm">Sync Ulang</button>
-                </div>
+                <div v-if="loading" class="text-center pt-20">Loading...</div>
                 <div v-else class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                     <div v-for="p in products" :key="p.id" @click="add(p)" class="bg-white rounded-xl shadow-sm hover:shadow-md cursor-pointer overflow-hidden border border-transparent hover:border-blue-500 flex flex-col h-60">
                         <div class="h-36 bg-gray-100 relative"><img :src="p.image" loading="lazy" class="w-full h-full object-cover"></div>
@@ -106,7 +104,6 @@
             </div>
         </div>
 
-        <!-- Modal & Receipt (Hidden) removed for brevity but assume exist as in previous version -->
         <!-- Modal -->
         <div v-if="modal" class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden p-6">
@@ -151,5 +148,21 @@
         };
     </script>
     <script src="<?php echo KRESUBER_POS_PRO_URL; ?>assets/js/pos-app.js"></script>
+    
+    <!-- FAILSAFE: Force Remove Loader if JS Hangs -->
+    <script>
+        setTimeout(function() {
+            var loader = document.getElementById('app-loading');
+            var app = document.getElementById('app');
+            if (loader && loader.style.display !== 'none') {
+                // If app is ready but loader still there
+                if (app.innerHTML.trim() !== '') {
+                    loader.style.display = 'none';
+                } else {
+                    document.getElementById('loading-error').classList.remove('hidden');
+                }
+            }
+        }, 5000); // 5 seconds timeout
+    </script>
 </body>
 </html>
