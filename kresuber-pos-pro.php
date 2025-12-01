@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       Sistem Kasir (POS) Modern v1.7.1. Fix: Loading Stuck Solver & Failsafe Init.
- * Version:           1.7.1
+ * Description:       Sistem Kasir (POS) Modern v1.7.2. Fix: Loading Stuck Solver & Failsafe Init.
+ * Version:           1.7.2
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
