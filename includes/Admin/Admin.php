@@ -1,161 +1,135 @@
 <?php
 namespace Kresuber\POS_Pro\Admin;
 
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
+if ( ! defined( 'ABSPATH' ) ) exit;
 
 class Admin {
+    private $version = '1.7.0';
 
     public function register_settings() {
-        register_setting( 'kresuber_pos_settings', 'kresuber_pos_logo', 'sanitize_text_field' );
-        register_setting( 'kresuber_pos_settings', 'kresuber_pos_theme', 'sanitize_text_field' );
-        register_setting( 'kresuber_pos_settings', 'kresuber_qris_image', 'sanitize_text_field' );
-        register_setting( 'kresuber_pos_settings', 'kresuber_printer_width', 'sanitize_text_field' );
-        
-        register_setting( 'kresuber_pos_settings', 'kresuber_cashiers', [
-            'sanitize_callback' => function( $input ) {
-                $decoded = json_decode( $input );
-                return ( json_last_error() === JSON_ERROR_NONE ) ? $input : '["Kasir 1"]';
-            }
-        ]);
+        register_setting( 'kresuber_pos_settings', 'kresuber_pos_logo' );
+        register_setting( 'kresuber_pos_settings', 'kresuber_pos_theme' );
+        register_setting( 'kresuber_pos_settings', 'kresuber_printer_width' );
+        register_setting( 'kresuber_pos_settings', 'kresuber_qris_image' );
+        register_setting( 'kresuber_pos_settings', 'kresuber_cashiers' );
     }
 
     public function register_menu() {
-        add_menu_page( 
-            'Kresuber POS', 
-            'Kresuber POS', 
-            'manage_woocommerce', 
-            'kresuber-pos', 
-            [ $this, 'render_dashboard' ], 
-            'dashicons-store', 
-            56 
-        );
+        add_menu_page( 'Kresuber POS', 'Kresuber POS', 'manage_woocommerce', 'kresuber-pos', [ $this, 'render_dashboard' ], 'dashicons-store', 56 );
     }
 
     public function enqueue_styles() {
         wp_enqueue_media();
-        wp_enqueue_style( 'kresuber-admin', KRESUBER_POS_PRO_URL . 'assets/css/admin.css', [], KRESUBER_POS_PRO_VERSION );
+        wp_enqueue_style( 'kresuber-admin', KRESUBER_POS_PRO_URL . 'assets/css/admin.css', [], $this->version );
     }
 
     public function render_dashboard() {
-        $logo     = get_option( 'kresuber_pos_logo' );
-        $theme    = get_option( 'kresuber_pos_theme', 'retail' );
-        $qris     = get_option( 'kresuber_qris_image' );
-        $width    = get_option( 'kresuber_printer_width', '58mm' );
-        $cashiers = json_decode( get_option( 'kresuber_cashiers', '["Kasir 1"]' ) ) ?: ['Kasir 1'];
+        $logo = get_option( 'kresuber_pos_logo' );
+        $theme = get_option( 'kresuber_pos_theme', 'retail' );
+        $qris = get_option( 'kresuber_qris_image' );
+        $width = get_option( 'kresuber_printer_width', '58mm' );
+        $cashiers_json = get_option( 'kresuber_cashiers', '[]' );
         
+        // Theme Definitions
         $themes = [
-            'retail'    => ['label' => 'Retail (Tosca)', 'color' => '#00A78E', 'bg' => '#F0FBF8'],
-            'grosir'    => ['label' => 'Grosir (Biru)', 'color' => '#0B5FFF', 'bg' => '#F1F6FF'],
-            'sembako'   => ['label' => 'Sembako (Kuning)', 'color' => '#F59E0B', 'bg' => '#FFF7ED'],
-            'kelontong' => ['label' => 'Kelontong (Ungu)', 'color' => '#7C4DFF', 'bg' => '#F8F7FF'],
-            'sayur'     => ['label' => 'Sayur (Hijau)', 'color' => '#10B981', 'bg' => '#F0FFF4'],
-            'buah'      => ['label' => 'Buah (Merah)', 'color' => '#FF6B6B', 'bg' => '#FFF5F5'],
+            'retail'  => ['label' => 'Toko Retail',  'color' => '#00A78E', 'bg' => '#F0FBF8'],
+            'grosir'  => ['label' => 'Toko Grosir',  'color' => '#0B5FFF', 'bg' => '#F1F6FF'],
+            'sembako' => ['label' => 'Warung Sembako', 'color' => '#F59E0B', 'bg' => '#FFF7ED'],
+            'kelontong'=>['label' => 'Warung Kelontong','color'=> '#7C4DFF', 'bg' => '#F8F7FF'],
+            'sayur'   => ['label' => 'Warung Sayur', 'color' => '#10B981', 'bg' => '#F0FFF4'],
+            'buah'    => ['label' => 'Warung Buah',  'color' => '#FF6B6B', 'bg' => '#FFF5F5'],
         ];
         ?>
-        <div class="kresuber-wrap">
+        <div class="k-wrap">
             <header class="k-header">
                 <div class="k-brand">
-                    <div class="k-icon-box"><span class="dashicons dashicons-store"></span></div>
-                    <div class="k-brand-text">
-                        <h1>Kresuber POS Pro</h1>
-                        <p>Versi <?php echo KRESUBER_POS_PRO_VERSION; ?> | WooCommerce HPOS Ready</p>
-                    </div>
+                    <h1>Kresuber POS Pro <span class="k-pill">v1.7.0</span></h1>
+                    <p>Sistem Kasir Toko Modern & Terintegrasi</p>
                 </div>
-                <div class="k-actions">
-                    <a href="<?php echo esc_url( home_url( '/pos' ) ); ?>" target="_blank" class="k-btn k-btn-primary">
-                        <span class="dashicons dashicons-external"></span> Buka Aplikasi POS
-                    </a>
-                </div>
+                <a href="<?php echo home_url('/pos'); ?>" target="_blank" class="k-btn k-btn-primary">Buka Aplikasi POS</a>
             </header>
 
             <form method="post" action="options.php" class="k-form">
-                <?php settings_fields( 'kresuber_pos_settings' ); do_settings_sections( 'kresuber_pos_settings' ); ?>
+                <?php settings_fields('kresuber_pos_settings'); do_settings_sections('kresuber_pos_settings'); ?>
                 
-                <div class="k-grid-layout">
-                    <div class="k-main-col">
-                        <!-- Info Panel -->
-                        <div class="k-card" style="border-left: 4px solid #10b981;">
-                            <div class="k-card-body">
-                                <h3 style="margin-top:0;">✨ Update v1.8.0: Performa Super Cepat</h3>
-                                <p style="font-size:13px; color:#64748b; line-height: 1.6;">
-                                    Kami telah merombak sistem sinkronisasi. Kini POS menggunakan metode <strong>Batch Sync</strong> (bertahap) yang tidak akan memberatkan server, meskipun Anda memiliki ribuan produk. Stok juga tersinkronisasi secara real-time saat checkout.
-                                </p>
+                <div class="k-grid">
+                    <!-- Card: Tema -->
+                    <div class="k-card">
+                        <div class="k-card-head"><h3>Tampilan & Tema Toko</h3></div>
+                        <div class="k-card-body">
+                            <label class="k-label">Pilih Jenis Toko (Tema Warna)</label>
+                            <div class="k-theme-grid">
+                                <?php foreach($themes as $key => $val): ?>
+                                <label class="k-theme-option">
+                                    <input type="radio" name="kresuber_pos_theme" value="<?php echo $key; ?>" <?php checked($theme, $key); ?>>
+                                    <div class="k-swatch" style="--accent:<?php echo $val['color']; ?>; --bg:<?php echo $val['bg']; ?>">
+                                        <div class="k-swatch-header"></div>
+                                        <span><?php echo $val['label']; ?></span>
+                                    </div>
+                                </label>
+                                <?php endforeach; ?>
                             </div>
-                        </div>
-
-                        <!-- Theme Panel -->
-                        <div class="k-card">
-                            <div class="k-card-head"><h3>Tampilan & Branding</h3></div>
-                            <div class="k-card-body">
-                                <div class="k-form-group">
-                                    <label class="k-label">Pilih Tema Warna</label>
-                                    <div class="k-theme-grid">
-                                        <?php foreach ( $themes as $key => $p ): ?>
-                                        <label class="k-theme-option <?php echo $theme === $key ? 'selected' : ''; ?>">
-                                            <input type="radio" name="kresuber_pos_theme" value="<?php echo esc_attr( $key ); ?>" <?php checked( $theme, $key ); ?> class="hidden">
-                                            <div class="k-swatch" style="background: <?php echo esc_attr( $p['bg'] ); ?>; border-color: <?php echo esc_attr( $p['color'] ); ?>;">
-                                                <div class="k-swatch-accent" style="background: <?php echo esc_attr( $p['color'] ); ?>;"></div>
-                                                <span style="color: <?php echo esc_attr( $p['color'] ); ?>; font-weight:bold; font-size:12px;"><?php echo esc_html( $p['label'] ); ?></span>
-                                            </div>
-                                        </label>
-                                        <?php endforeach; ?>
+                            
+                            <div class="k-mt-20">
+                                <label class="k-label">Logo Toko</label>
+                                <div class="k-media-input">
+                                    <div class="k-preview-img" id="logo-preview">
+                                        <?php echo $logo ? '<img src="'.esc_url($logo).'">' : '<span class="dashicons dashicons-format-image"></span>'; ?>
                                     </div>
-                                </div>
-                                <div class="k-form-group">
-                                    <label class="k-label">Logo Struk & Header</label>
-                                    <div class="k-media-wrap">
-                                        <div class="k-img-preview" id="logo-prev">
-                                            <?php echo $logo ? '<img src="' . esc_url( $logo ) . '">' : '<span class="dashicons dashicons-format-image"></span>'; ?>
-                                        </div>
-                                        <div class="k-media-btns">
-                                            <input type="hidden" name="kresuber_pos_logo" id="kresuber_pos_logo" value="<?php echo esc_attr( $logo ); ?>">
-                                            <button type="button" class="k-btn k-btn-outline upload-btn" data-target="#kresuber_pos_logo" data-prev="#logo-prev">Ganti Logo</button>
-                                            <?php if ( $logo ): ?><button type="button" class="k-link-danger remove-btn" data-target="#kresuber_pos_logo">Hapus</button><?php endif; ?>
-                                        </div>
-                                    </div>
+                                    <input type="hidden" name="kresuber_pos_logo" id="kresuber_pos_logo" value="<?php echo esc_attr($logo); ?>">
+                                    <button type="button" class="k-btn k-btn-outline upload-btn" data-target="#kresuber_pos_logo">Upload Logo</button>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="k-side-col">
-                        <div class="k-card">
-                            <div class="k-card-head"><h3>Pengaturan Kasir</h3></div>
-                            <div class="k-card-body">
-                                <label class="k-label">Nama Kasir (Pisahkan koma)</label>
-                                <?php $c_str = implode( ', ', $cashiers ); ?>
-                                <textarea id="cashier_input" class="k-textarea" rows="4"><?php echo esc_textarea( $c_str ); ?></textarea>
-                                <input type="hidden" name="kresuber_cashiers" id="kresuber_cashiers_json" value="<?php echo esc_attr( json_encode( $cashiers ) ); ?>">
+                    <!-- Card: Hardware & Payment -->
+                    <div class="k-card">
+                        <div class="k-card-head"><h3>Hardware & Pembayaran</h3></div>
+                        <div class="k-card-body">
+                            <label class="k-label">QRIS Pembayaran (Statis)</label>
+                            <div class="k-media-input">
+                                <div class="k-preview-img" id="qris-preview">
+                                    <?php echo $qris ? '<img src="'.esc_url($qris).'">' : '<span class="dashicons dashicons-qr"></span>'; ?>
+                                </div>
+                                <input type="hidden" name="kresuber_qris_image" id="kresuber_qris_image" value="<?php echo esc_attr($qris); ?>">
+                                <button type="button" class="k-btn k-btn-outline upload-btn" data-target="#kresuber_qris_image">Upload QRIS</button>
                             </div>
-                            <div class="k-card-foot">
-                                <?php submit_button( 'Simpan Pengaturan', 'primary w-full', 'submit', false ); ?>
-                            </div>
+                            <hr class="k-divider">
+                            <label class="k-label">Lebar Printer Thermal</label>
+                            <select name="kresuber_printer_width" class="k-input">
+                                <option value="58mm" <?php selected($width, '58mm'); ?>>58mm (Portable / Bluetooth)</option>
+                                <option value="80mm" <?php selected($width, '80mm'); ?>>80mm (Desktop)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Card: Kasir -->
+                    <div class="k-card full-width">
+                        <div class="k-card-head"><h3>Manajemen Kasir</h3></div>
+                        <div class="k-card-body">
+                            <label class="k-label">Nama Kasir (Pisahkan dengan koma)</label>
+                            <textarea id="cashier_input" class="k-input" rows="3" placeholder="Contoh: Budi, Siti, Admin"><?php echo implode(', ', json_decode($cashiers_json) ?: []); ?></textarea>
+                            <input type="hidden" name="kresuber_cashiers" id="kresuber_cashiers_json" value="<?php echo esc_attr($cashiers_json); ?>">
+                        </div>
+                        <div class="k-card-foot">
+                            <?php submit_button('Simpan Pengaturan', 'primary', 'submit', false); ?>
                         </div>
                     </div>
                 </div>
             </form>
         </div>
-        
         <script>
         jQuery(document).ready(function($){
-            // Media Uploader Logic
             $('.upload-btn').click(function(e){ 
-                e.preventDefault(); 
-                var t = $(this).data('target'), p = $($(this).data('prev'));
-                var f = wp.media({ title: 'Pilih Gambar', multiple: false }); 
-                f.on('select', function(){ 
-                    var u = f.state().get('selection').first().toJSON().url; 
-                    $(t).val(u); p.html('<img src="'+u+'">'); 
-                }); 
+                e.preventDefault(); var t=$(this).data('target'); var p=$(this).siblings('.k-preview-img');
+                var f=wp.media({title:'Pilih Gambar',multiple:false}); 
+                f.on('select',function(){ var u=f.state().get('selection').first().toJSON().url; $(t).val(u); p.html('<img src=\"'+u+'\">'); }); 
                 f.open(); 
             });
-            $('.remove-btn').click(function(){ $($(this).data('target')).val(''); $($(this).data('prev')).html('<span class="dashicons dashicons-format-image"></span>'); });
-            $('.k-theme-option').click(function(){ $('.k-theme-option').removeClass('selected'); $(this).addClass('selected'); });
             $('form').submit(function(){
-                var raw = $('#cashier_input').val(), arr = raw.split(',').map(s=>s.trim()).filter(s=>s!=='');
-                $('#kresuber_cashiers_json').val(JSON.stringify(arr.length?arr:['Kasir']));
+                var arr = $('#cashier_input').val().split(',').map(s => s.trim()).filter(s => s);
+                $('#kresuber_cashiers_json').val(JSON.stringify(arr));
             });
         });
         </script>
