@@ -4,7 +4,8 @@ db.version(1).stores({ products: "id, sku, barcode, category_slug, search_text" 
 
 createApp({
     setup() {
-        const config = ref(kresuberParams.config);
+        // Config
+        const config = ref(kresuberParams.config || {});
         const products = ref([]);
         const categories = ref([]);
         const cart = ref([]);
@@ -17,6 +18,7 @@ createApp({
         const syncing = ref(false);
         const activeCashier = ref('default');
         
+        // Payment
         const showMobileCart = ref(false);
         const showPayModal = ref(false);
         const paymentMethod = ref('cash');
@@ -27,6 +29,7 @@ createApp({
         
         const taxRate = kresuberParams.taxRate || 0;
 
+        // Computed
         const subTotal = computed(() => cart.value.reduce((sum, i) => sum + (i.price * i.qty), 0));
         const taxAmount = computed(() => Math.round(subTotal.value * (taxRate / 100)));
         const grandTotal = computed(() => subTotal.value + taxAmount.value);
@@ -34,25 +37,40 @@ createApp({
         const quickCash = computed(() => [10000, 20000, 50000, 100000].filter(a => a >= grandTotal.value).slice(0, 3));
         const cartTotalQty = computed(() => cart.value.reduce((acc, item) => acc + item.qty, 0));
 
+        // Formatters
         const formatPrice = (v) => kresuberParams.currencySymbol + ' ' + new Intl.NumberFormat('id-ID').format(v);
         const formatNumber = (v) => new Intl.NumberFormat('id-ID').format(v);
 
-        const fetchOrders = async () => {
-            // (Same logic as v2)
+        // --- CORE LOGIC ---
+
+        const removeLoadingScreen = () => {
+            const loader = document.getElementById('app-loading');
+            if(loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.style.display = 'none', 500);
+            }
         };
 
         const syncProducts = async () => {
             syncing.value = true; loading.value = true;
             try {
+                document.getElementById('loading-status').innerText = "Sinkronisasi Produk...";
                 const res = await axios.get(`${kresuberParams.apiUrl}/products`, { headers: { 'X-WP-Nonce': kresuberParams.nonce } });
                 const items = res.data.map(p => ({ ...p, search_text: `${p.name} ${p.sku} ${p.barcode||''}`.toLowerCase() }));
                 
+                // Extract Categories
                 const cats = {}; items.forEach(i => cats[i.category_slug] = { slug: i.category_slug, name: i.category_name });
                 categories.value = Object.values(cats);
 
-                await db.products.clear(); await db.products.bulkAdd(items);
+                await db.products.clear(); 
+                await db.products.bulkAdd(items);
                 searchLocal();
-            } catch (e) { alert("Sync Failed"); } finally { syncing.value = false; loading.value = false; }
+            } catch (e) { 
+                console.error(e);
+                alert("Sync Failed: " + e.message); 
+            } finally { 
+                syncing.value = false; loading.value = false; 
+            }
         };
 
         const searchLocal = async () => {
@@ -64,7 +82,15 @@ createApp({
                 if (exact) { addToCart(exact); searchQuery.value = ''; return; }
                 const all = await col.toArray();
                 products.value = all.filter(p => p.search_text.includes(q)).slice(0, 50);
-            } else { products.value = await col.limit(50).toArray(); }
+            } else { 
+                products.value = await col.limit(50).toArray(); 
+                // Populate categories if empty (from local DB)
+                if(categories.value.length === 0 && products.value.length > 0) {
+                    const allProds = await db.products.toArray();
+                    const cats = {}; allProds.forEach(i => cats[i.category_slug] = { slug: i.category_slug, name: i.category_name });
+                    categories.value = Object.values(cats);
+                }
+            }
         };
 
         const setCategory = (slug) => { currentCategory.value = slug; searchLocal(); };
@@ -106,9 +132,26 @@ createApp({
         };
 
         onMounted(async () => {
-            const saved = localStorage.getItem('kresuber_held'); if(saved) heldItems.value = JSON.parse(saved);
-            const count = await db.products.count();
-            if(count === 0) await syncProducts(); else searchLocal();
+            try {
+                // Restore Session
+                const saved = localStorage.getItem('kresuber_held'); if(saved) heldItems.value = JSON.parse(saved);
+                
+                // Check DB
+                const count = await db.products.count();
+                if(count === 0) {
+                    await syncProducts();
+                } else {
+                    await searchLocal();
+                }
+                
+            } catch (err) {
+                console.error("Init failed:", err);
+                alert("Gagal memuat database lokal. Coba refresh atau bersihkan cache.");
+            } finally {
+                // ALWAYS REMOVE LOADING SCREEN
+                removeLoadingScreen();
+            }
+
             window.addEventListener('keydown', e => { if(e.key === 'F3') { e.preventDefault(); document.querySelector('input[type="text"]')?.focus(); } });
         });
 
@@ -117,7 +160,7 @@ createApp({
         return {
             config, products, categories, cart, heldItems, recentOrders, currentCategory, searchQuery, loading, syncing, 
             activeCashier, showMobileCart, cartTotalQty,
-            syncProducts, searchLocal, setCategory, fetchOrders, addToCart, removeFromCart, updateQty, clearCart, toggleHold,
+            syncProducts, searchLocal, setCategory, addToCart, removeFromCart, updateQty, clearCart, toggleHold,
             showPayModal, openPayModal, paymentMethod, cashReceived, processing, cashInput, quickCash,
             subTotal, taxAmount, grandTotal, cashChange, processCheckout, lastReceipt, formatPrice, formatNumber
         };
