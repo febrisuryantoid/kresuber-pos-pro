@@ -1,0 +1,1 @@
+<?php namespace Kresuber\POS_Pro\Core; class i18n { public function load_plugin_textdomain() {} }

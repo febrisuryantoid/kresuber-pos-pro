@@ -8,7 +8,7 @@ import time
 # --- CONFIG ---
 PLUGIN_NAME = "Kresuber POS Pro"
 PLUGIN_SLUG = "kresuber-pos-pro"
-PLUGIN_VERSION = "1.7.0"
+PLUGIN_VERSION = "1.7.1"
 OUTPUT_DIR = "kresuber-pos-pro"
 
 print(f"[INIT] Building {PLUGIN_NAME} v{PLUGIN_VERSION} (Corporate Edition)...")
