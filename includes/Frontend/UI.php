@@ -13,7 +13,8 @@ class UI {
                 'logo' => get_option('kresuber_pos_logo', ''),
                 'qris' => get_option('kresuber_qris_image', ''),
                 'printer_width' => get_option('kresuber_printer_width', '58mm'),
-                'cashiers' => json_decode(get_option('kresuber_cashiers', '[]'))
+                'cashiers' => json_decode(get_option('kresuber_cashiers', '[]')),
+                'site_name' => get_bloginfo('name')
             ];
             include KRESUBER_POS_PRO_PATH . 'templates/app.php';
             exit;

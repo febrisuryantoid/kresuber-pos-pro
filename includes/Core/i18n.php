@@ -1,1 +1,1 @@
-<?php namespace Kresuber\POS_Pro\Core; class i18n { public function load_plugin_textdomain() {} }
+<?php namespace Kresuber\POS_Pro\Core; class i18n { public function load_plugin_textdomain() { load_plugin_textdomain('kresuber-pos-pro', false, dirname(dirname(dirname(__FILE__))).'/languages/'); } }
