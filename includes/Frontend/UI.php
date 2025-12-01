@@ -8,15 +8,14 @@ class UI {
     public function load_pos_app() {
         if ( get_query_var( 'kresuber_pos' ) == 1 ) {
             if ( ! is_user_logged_in() || ! current_user_can('manage_woocommerce') ) { auth_redirect(); exit; }
+            global $kresuber_config;
             
-            // THEME COLORS MAP
             $themes = [
                 'retail'  => '#00A78E', 'grosir'  => '#0B5FFF', 'sembako' => '#F59E0B',
                 'kelontong'=> '#7C4DFF', 'sayur'   => '#10B981', 'buah'    => '#FF6B6B'
             ];
-            $theme_key = get_option( 'kresuber_pos_theme', 'retail' );
-            
-            global $kresuber_config;
+            $theme_key = get_option( 'kresuber_business_type', 'retail' );
+
             $kresuber_config = [
                 'logo' => get_option('kresuber_pos_logo', ''),
                 'qris' => get_option('kresuber_qris_image', ''),
@@ -25,7 +24,6 @@ class UI {
                 'theme_color' => $themes[$theme_key] ?? '#00A78E',
                 'site_name' => get_bloginfo('name')
             ];
-            
             include KRESUBER_POS_PRO_PATH . 'templates/app.php';
             exit;
         }
