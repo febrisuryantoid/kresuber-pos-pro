@@ -21,38 +21,39 @@ class Kresuber_POS_API {
         return current_user_can('manage_woocommerce');
     }
 
+    // Mengambil semua produk untuk disinkronkan ke IndexedDB browser
     public function get_products($request) {
+        // Ambil SEMUA produk published (Heavy query, cached in browser later)
         $args = [
-            'limit' => -1,
+            'limit' => -1, 
             'status' => 'publish',
         ];
         
-        $search = $request->get_param('search');
-        if($search) {
-            $args['s'] = $search;
-        }
-        
-        $category = $request->get_param('category');
-        if($category && $category != 'all') {
-            $args['category'] = [$category];
-        }
-
         $products = wc_get_products($args);
         $data = [];
 
         foreach ($products as $product) {
             $image_id = $product->get_image_id();
             $image_url = $image_id ? wp_get_attachment_image_url($image_id, 'thumbnail') : wc_placeholder_img_src();
+            
+            // Ambil Kategori pertama untuk filtering sederhana
+            $cats = $product->get_category_ids();
+            $cat_slug = 'uncategorized';
+            if(!empty($cats)) {
+                $term = get_term($cats[0], 'product_cat');
+                if($term && !is_wp_error($term)) $cat_slug = $term->slug;
+            }
 
             $data[] = [
                 'id' => $product->get_id(),
                 'name' => $product->get_name(),
-                'price' => $product->get_price(),
-                'regular_price' => $product->get_regular_price(),
-                'sale_price' => $product->get_sale_price(),
+                'price' => (float) $product->get_price(),
+                'regular_price' => (float) $product->get_regular_price(),
                 'image' => $image_url,
-                'stock' => $product->get_stock_quantity() ?? '∞',
-                'sku'   => $product->get_sku()
+                'stock' => $product->get_stock_quantity() ?? 9999,
+                'sku'   => (string) $product->get_sku(),
+                'barcode' => (string) $product->get_meta('_barcode'), // Support plugin barcode lain
+                'category_slug' => $cat_slug
             ];
         }
 
@@ -62,7 +63,9 @@ class Kresuber_POS_API {
     public function create_order($request) {
         $params = $request->get_json_params();
         $items = $params['items'];
-        $payment_method = $params['payment_method'] ?? 'cod';
+        $payment_method = $params['payment_method'] ?? 'cash';
+        $amount_tendered = $params['amount_tendered'] ?? 0;
+        $change = $params['change'] ?? 0;
 
         try {
             $order = wc_create_order();
@@ -74,19 +77,26 @@ class Kresuber_POS_API {
                 }
             }
 
+            // Set Billing Dummy (POS Walk-in Customer)
+            $order->set_billing_first_name('Walk-in');
+            $order->set_billing_last_name('Customer');
             $order->set_payment_method($payment_method);
+            $order->set_payment_method_title(ucfirst($payment_method));
+            
+            // Simpan info pembayaran POS di note/meta
+            $order->add_order_note("POS Order. Tunai: $amount_tendered. Kembali: $change");
+
             $order->calculate_totals();
             
-            if ($params['status'] === 'completed') {
-                $order->update_status('completed', 'Order created via Kresuber POS Pro');
-            } else {
-                $order->update_status('processing', 'Order created via Kresuber POS Pro');
-            }
+            // Langsung Completed
+            $order->update_status('completed', 'Order created via Kresuber POS Pro');
 
             return rest_ensure_response([
                 'success' => true,
                 'order_id' => $order->get_id(),
-                'total' => $order->get_total()
+                'order_number' => $order->get_order_number(),
+                'total' => $order->get_total(),
+                'date' => $order->get_date_created()->date('Y-m-d H:i:s')
             ]);
 
         } catch (Exception $e) {

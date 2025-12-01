@@ -1,226 +1,290 @@
-const { createApp } = Vue;
+const { createApp, ref, computed, onMounted, nextTick } = Vue;
 
-// 1. Setup Database Lokal (Dexie)
+// --- 1. INISIALISASI DEXIE DB (IndexedDB Wrapper) ---
+// Ini yang bikin aplikasi cepat & offline-first seperti WCPOS
 const db = new Dexie("KresuberPOS_DB");
 db.version(1).stores({
-    products: "id, name, sku, category_slug, search_keywords" // Indexing
+    products: "id, sku, barcode, category_slug, search_text" // Indexing fields
 });
 
 createApp({
-    data() {
-        return {
-            products: [],
-            cart: [],
-            categories: [],
-            currentCategory: 'all',
-            searchQuery: '',
-            loading: false,
-            syncing: false,
-            
-            // Payment State
-            showPayModal: false,
-            paymentMethod: 'cash',
-            cashReceived: 0,
-            processing: false,
-            taxRate: kresuberParams.taxRate,
-
-            // Receipt Data
-            lastOrderId: '',
-            lastOrderItems: [],
-            lastOrderTotal: 0,
-            lastCashReceived: 0,
-            lastCashChange: 0,
-            lastPaymentMethod: ''
-        }
-    },
-    computed: {
-        subTotal() { return this.cart.reduce((sum, i) => sum + (i.price * i.qty), 0); },
-        taxAmount() { return Math.round(this.subTotal * (this.taxRate / 100)); },
-        grandTotal() { return this.subTotal + this.taxAmount; },
-        cashChange() { return this.cashReceived - this.grandTotal; }
-    },
-    async mounted() {
-        // Init: Cek data lokal dulu, kalau kosong baru sync
-        const count = await db.products.count();
-        if (count === 0) {
-            await this.syncProducts();
-        } else {
-            this.searchLocal(); // Load data dari DB
-        }
+    setup() {
+        // --- State ---
+        const products = ref([]);
+        const categories = ref([]);
+        const cart = ref([]);
+        const heldItems = ref([]);
+        const currentCategory = ref('all');
+        const searchQuery = ref('');
+        const loading = ref(false);
+        const syncing = ref(false);
+        const dbReady = ref(false);
+        const productCount = ref(0);
         
-        // Init Categories (Extract from DB in real app, here hardcoded for simplicity of demo)
-        this.categories = [
-            {name: 'Snack', slug: 'snack'},
-            {name: 'Minuman', slug: 'minuman'},
-            {name: 'Ice Cream', slug: 'ice-cream-joyday'},
-            {name: 'Permen', slug: 'permen'},
-            {name: 'Sembako', slug: 'sembako'}
-        ];
+        // Payment
+        const showPayModal = ref(false);
+        const paymentMethod = ref('cash');
+        const cashReceived = ref('');
+        const processing = ref(false);
+        const cashInput = ref(null);
+        
+        // Receipt Data
+        const lastReceipt = ref({});
+        
+        // Config
+        const taxRate = kresuberParams.taxRate;
 
-        // Barcode Listener Global
-        window.addEventListener('keydown', this.handleBarcodeScan);
-        // Focus search on F3
-        window.addEventListener('keydown', (e) => {
-            if(e.key === 'F3') { e.preventDefault(); this.$refs.searchInput.focus(); }
+        // --- Computed ---
+        const subTotal = computed(() => cart.value.reduce((sum, item) => sum + (item.price * item.qty), 0));
+        const taxAmount = computed(() => Math.round(subTotal.value * (taxRate / 100)));
+        const grandTotal = computed(() => subTotal.value + taxAmount.value);
+        const cashChange = computed(() => (cashReceived.value || 0) - grandTotal.value);
+        
+        const quickCash = computed(() => {
+            const total = grandTotal.value;
+            return [50000, 100000].filter(amt => amt > total);
         });
-    },
-    methods: {
-        formatPrice(val) {
-            return kresuberParams.currency + ' ' + new Intl.NumberFormat('id-ID').format(val);
-        },
 
-        // --- DATABASE LOGIC (WCPOS FEATURE) ---
-        async syncProducts() {
-            this.syncing = true;
-            this.loading = true;
+        // --- Methods ---
+        
+        const formatPrice = (val) => kresuberParams.currencySymbol + ' ' + new Intl.NumberFormat('id-ID').format(val);
+        const formatNumber = (val) => new Intl.NumberFormat('id-ID').format(val);
+
+        // 1. SYNC DATA DARI WP API KE DEXIE
+        const syncProducts = async () => {
+            syncing.value = true;
+            loading.value = true;
             try {
-                // Fetch semua produk dari WP API
+                // Ambil semua data
                 const response = await axios.get(`${kresuberParams.apiUrl}/products`, {
                     headers: { 'X-WP-Nonce': kresuberParams.nonce }
                 });
                 
-                // Siapkan data untuk Dexie (Flattening data agar searchable)
-                const productsToStore = response.data.map(p => ({
+                // Siapkan data untuk indexing
+                const items = response.data.map(p => ({
                     ...p,
-                    search_keywords: `${p.name} ${p.sku}`.toLowerCase(),
-                    category_slug: p.category_slug || 'uncategorized' // Asumsi API return cat slug
+                    // Buat field gabungan untuk search super cepat
+                    search_text: `${p.name} ${p.sku} ${p.barcode || ''}`.toLowerCase() 
                 }));
 
-                // Clear & Bulk Add
-                await db.products.clear();
-                await db.products.bulkAdd(productsToStore);
-                
-                this.searchLocal(); // Refresh view
-                // alert('Sinkronisasi Selesai!');
-            } catch (err) {
-                console.error(err);
-                alert('Gagal Sync!');
-            } finally {
-                this.syncing = false;
-                this.loading = false;
-            }
-        },
+                // Extract Categories (Unik)
+                const cats = new Set(items.map(i => i.category_slug));
+                categories.value = Array.from(cats).map(slug => ({
+                    slug, 
+                    name: slug === 'uncategorized' ? 'Lainnya' : slug.replace(/-/g, ' ').toUpperCase()
+                }));
 
-        async searchLocal() {
+                // Simpan ke Dexie
+                await db.products.clear();
+                await db.products.bulkAdd(items);
+                
+                productCount.value = await db.products.count();
+                dbReady.value = true;
+                
+                // Load ulang tampilan
+                searchLocal(); 
+                
+            } catch (error) {
+                console.error("Sync Error", error);
+                alert("Gagal sinkronisasi. Cek koneksi internet.");
+            } finally {
+                syncing.value = false;
+                loading.value = false;
+            }
+        };
+
+        // 2. SEARCH LOKAL (Instant)
+        const searchLocal = async () => {
             let collection = db.products.toCollection();
 
-            // 1. Filter Category
-            if (this.currentCategory !== 'all') {
-                collection = db.products.where('category_slug').equals(this.currentCategory); // Butuh update API agar return slug
-                // Fallback sementara untuk demo jika API belum return slug:
-                // collection = db.products.filter(p => JSON.stringify(p).includes(this.currentCategory));
+            // Filter Kategori
+            if (currentCategory.value !== 'all') {
+                collection = db.products.where('category_slug').equals(currentCategory.value);
             }
 
-            // 2. Filter Search (Manual filter di memory karena Dexie basic search terbatas)
-            const query = this.searchQuery.toLowerCase();
+            const query = searchQuery.value.toLowerCase().trim();
+            
             if (query) {
-                // Prioritas: Exact SKU match (Barcode)
-                const exactSku = await db.products.where('sku').equals(query).first();
-                if (exactSku) {
-                    this.addToCart(exactSku);
-                    this.searchQuery = ''; // Clear after scan
+                // LOGIKA SCANNER BARCODE PRIORITY
+                // Jika input cocok persis dengan SKU atau Barcode -> Langsung Add to Cart
+                const exactMatch = await db.products.where('sku').equals(query)
+                    .or('barcode').equals(query).first();
+
+                if (exactMatch) {
+                    addToCart(exactMatch);
+                    searchQuery.value = ''; // Reset search setelah scan
                     return;
                 }
 
-                // Normal Search
-                const results = await db.products.filter(p => p.search_keywords.includes(query)).toArray();
-                this.products = results;
+                // Jika bukan barcode exact, lakukan search text fuzzy
+                // Menggunakan filter JS di memori karena 'contains' Dexie terbatas
+                const allInCat = await collection.toArray();
+                products.value = allInCat.filter(p => p.search_text.includes(query)).slice(0, 50);
             } else {
-                // Load All (Limit 50 biar ringan)
-                this.products = await collection.limit(50).toArray();
+                // Default view (limit 50 biar ringan)
+                products.value = await collection.limit(50).toArray();
             }
-        },
+        };
 
-        filterCategory(slug) {
-            this.currentCategory = slug;
-            this.searchLocal();
-        },
+        const clearSearch = () => {
+            searchQuery.value = '';
+            searchLocal();
+        };
 
-        handleBarcodeScan(e) {
-            // Logic scanner barcode biasanya cepat, bisa dideteksi interval
-            // Di sini kita pakai cara simple: Input box search auto focus kalau scan
-            if (e.target.tagName !== 'INPUT' && e.key.length === 1) {
-                this.$refs.searchInput.focus();
-            }
-        },
+        const filterCategory = (slug) => {
+            currentCategory.value = slug;
+            searchLocal();
+        };
 
-        // --- CART LOGIC ---
-        addToCart(product) {
-            const existing = this.cart.find(i => i.id === product.id);
+        // 3. CART ACTIONS
+        const addToCart = (product) => {
+            const existing = cart.value.find(i => i.id === product.id);
             if (existing) {
                 existing.qty++;
             } else {
-                this.cart.push({ ...product, qty: 1 });
+                cart.value.push({ ...product, qty: 1 });
             }
-            // Play beep sound
-            const audio = new Audio("data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU"); // Dummy short beep
-            // audio.play().catch(e=>{}); 
-        },
-        removeFromCart(item) {
-            this.cart = this.cart.filter(i => i.id !== item.id);
-        },
-        increaseQty(item) { item.qty++; },
-        decreaseQty(item) { 
-            if(item.qty > 1) item.qty--; 
-            else this.removeFromCart(item);
-        },
-        clearCart() {
-            if(confirm('Hapus semua item?')) this.cart = [];
-        },
-        holdOrder() {
-            if(this.cart.length === 0) return;
-            localStorage.setItem('kresuber_held_cart', JSON.stringify(this.cart));
-            this.cart = [];
-            alert('Order disimpan sementara (Hold).');
-        },
+            // Play Sound effect (Optional)
+            // new Audio(beepUrl).play(); 
+        };
 
-        // --- CHECKOUT LOGIC ---
-        async processPayment() {
-            this.processing = true;
+        const removeFromCart = (item) => {
+            cart.value = cart.value.filter(i => i.id !== item.id);
+        };
+
+        const increaseQty = (item) => item.qty++;
+        
+        const decreaseQty = (item) => {
+            if (item.qty > 1) item.qty--;
+            else removeFromCart(item);
+        };
+
+        const clearCart = () => {
+            if (confirm("Kosongkan keranjang?")) cart.value = [];
+        };
+
+        // 4. HOLD ORDER (Fitur Pro)
+        const toggleHold = () => {
+            if (heldItems.value.length > 0) {
+                // Restore
+                if (cart.value.length > 0 && !confirm("Timpah keranjang saat ini dengan order yang di-hold?")) return;
+                cart.value = [...heldItems.value];
+                heldItems.value = [];
+            } else {
+                // Hold
+                if (cart.value.length === 0) return;
+                heldItems.value = [...cart.value];
+                cart.value = [];
+                // Simpan ke LocalStorage agar persist kalau refresh
+                localStorage.setItem('pos_held_items', JSON.stringify(heldItems.value));
+            }
+        };
+
+        // 5. CHECKOUT & PRINT
+        const openPayModal = () => {
+            showPayModal.value = true;
+            nextTick(() => {
+                if (paymentMethod.value === 'cash' && cashInput.value) {
+                    cashInput.value.focus();
+                }
+            });
+        };
+
+        const processCheckout = async () => {
+            processing.value = true;
             try {
-                // 1. Push ke Server WP
-                const response = await axios.post(`${kresuberParams.apiUrl}/order`, {
-                    items: this.cart,
-                    payment_method: this.paymentMethod,
-                    status: 'completed'
-                }, { headers: { 'X-WP-Nonce': kresuberParams.nonce } });
+                // Kirim ke WP API
+                const orderData = {
+                    items: cart.value,
+                    payment_method: paymentMethod.value,
+                    amount_tendered: paymentMethod.value === 'cash' ? cashReceived.value : grandTotal.value,
+                    change: paymentMethod.value === 'cash' ? Math.max(0, cashChange.value) : 0
+                };
+
+                const response = await axios.post(`${kresuberParams.apiUrl}/order`, orderData, {
+                    headers: { 'X-WP-Nonce': kresuberParams.nonce }
+                });
 
                 if (response.data.success) {
-                    // 2. Set Data Resi
-                    this.lastOrderId = response.data.order_id;
-                    this.lastOrderItems = [...this.cart];
-                    this.lastOrderTotal = this.grandTotal;
-                    this.lastCashReceived = this.cashReceived;
-                    this.lastCashChange = this.cashChange;
-                    this.lastPaymentMethod = this.paymentMethod;
+                    // Siapkan Data Struk
+                    lastReceipt.value = {
+                        orderNumber: response.data.order_number,
+                        date: new Date().toLocaleString('id-ID'),
+                        cashier: kresuberParams.cashierName,
+                        items: [...cart.value],
+                        subTotal: subTotal.value,
+                        taxAmount: taxAmount.value,
+                        grandTotal: grandTotal.value,
+                        paymentMethod: paymentMethod.value,
+                        cashReceived: cashReceived.value,
+                        cashChange: Math.max(0, cashChange.value)
+                    };
 
-                    // 3. Print
-                    this.printReceipt();
+                    // Print Struk
+                    printReceipt();
 
-                    // 4. Reset
-                    this.showPayModal = false;
-                    this.cart = [];
-                    this.cashReceived = 0;
+                    // Reset
+                    cart.value = [];
+                    cashReceived.value = '';
+                    showPayModal.value = false;
                 }
-            } catch (err) {
-                alert('Gagal transaksi: ' + (err.response?.data?.message || err.message));
-            } finally {
-                this.processing = false;
-            }
-        },
 
-        printReceipt() {
-            // Teknik Hidden Iframe / New Window
+            } catch (error) {
+                alert("Gagal memproses transaksi: " + error.message);
+            } finally {
+                processing.value = false;
+            }
+        };
+
+        const printReceipt = () => {
             setTimeout(() => {
                 const content = document.getElementById('receipt-print').innerHTML;
-                const win = window.open('', '', 'height=500,width=400');
-                win.document.write('<html><head><title>Struk</title></head><body>');
+                const win = window.open('', '', 'width=300,height=600');
+                win.document.write('<html><head><title>Print Struk</title></head><body style="margin:0;">');
                 win.document.write(content);
                 win.document.write('</body></html>');
                 win.document.close();
+                win.focus();
                 win.print();
-                // win.close(); // Optional auto close
-            }, 500);
-        }
+                // win.close(); // Uncomment untuk auto close
+            }, 300);
+        };
+
+        // --- Lifecycle ---
+        onMounted(async () => {
+            // Restore held items
+            const savedHold = localStorage.getItem('pos_held_items');
+            if (savedHold) heldItems.value = JSON.parse(savedHold);
+
+            // Cek Database Lokal
+            productCount.value = await db.products.count();
+            if (productCount.value === 0) {
+                await syncProducts();
+            } else {
+                dbReady.value = true;
+                searchLocal();
+            }
+
+            // Global Keyboard Listener untuk Scanner & F3
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'F3') {
+                    e.preventDefault();
+                    // Fokus ke search bar
+                    const input = document.querySelector('input[type="text"]');
+                    if(input) input.focus();
+                }
+            });
+        });
+
+        return {
+            products, categories, cart, heldItems, currentCategory, searchQuery, 
+            loading, syncing, dbReady, productCount,
+            syncProducts, searchLocal, clearSearch, filterCategory,
+            addToCart, removeFromCart, increaseQty, decreaseQty, clearCart, toggleHold,
+            
+            showPayModal, openPayModal, paymentMethod, cashReceived, processing, cashInput, quickCash,
+            subTotal, taxAmount, grandTotal, cashChange, taxRate,
+            processCheckout, lastReceipt, formatPrice, formatNumber
+        };
     }
 }).mount('#app');
