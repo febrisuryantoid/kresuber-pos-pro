@@ -9,7 +9,6 @@ class UI {
         if ( get_query_var( 'kresuber_pos' ) == 1 ) {
             if ( ! is_user_logged_in() || ! current_user_can('manage_woocommerce') ) { auth_redirect(); exit; }
             
-            // CONFIG INJECTION
             global $kresuber_config;
             $theme_key = get_option( 'kresuber_business_type', 'retail' );
             $themes = [

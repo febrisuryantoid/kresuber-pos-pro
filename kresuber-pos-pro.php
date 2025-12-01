@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       Sistem Kasir (POS) Modern v1.6.0. Fitur: Tema Bisnis, Bluetooth Printer, QRIS, dan Manajemen Stok Realtime.
- * Version:           1.6.0
+ * Description:       Sistem Kasir (POS) Modern v1.6.1. Fitur: Tema Bisnis, Bluetooth Printer, QRIS, dan Manajemen Stok Realtime.
+ * Version:           1.6.1
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
@@ -17,7 +17,7 @@ namespace Kresuber\POS_Pro;
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'KRESUBER_POS_PRO_VERSION', '1.6.0' );
+define( 'KRESUBER_POS_PRO_VERSION', '1.6.1' );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 

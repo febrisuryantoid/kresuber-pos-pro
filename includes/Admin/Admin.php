@@ -4,18 +4,13 @@ namespace Kresuber\POS_Pro\Admin;
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 class Admin {
-    private $version = '1.6.0';
+    private $version = '1.6.1';
 
     public function register_settings() {
-        // Branding & Theme
         register_setting( 'kresuber_pos_settings', 'kresuber_pos_logo' );
-        register_setting( 'kresuber_pos_settings', 'kresuber_business_type' ); // Retail, Grocery, etc
-        
-        // Hardware
+        register_setting( 'kresuber_pos_settings', 'kresuber_business_type' );
         register_setting( 'kresuber_pos_settings', 'kresuber_qris_image' );
         register_setting( 'kresuber_pos_settings', 'kresuber_printer_width' );
-        
-        // Management
         register_setting( 'kresuber_pos_settings', 'kresuber_cashiers' );
     }
 
@@ -35,7 +30,6 @@ class Admin {
         $width = get_option( 'kresuber_printer_width', '58mm' );
         $cashiers = get_option( 'kresuber_cashiers', '[]' );
         
-        // Theme Colors Data
         $themes = [
             'retail' => ['label' => 'Toko Retail (Biru)', 'color' => '#3b82f6'],
             'grosir' => ['label' => 'Toko Grosir (Ungu)', 'color' => '#8b5cf6'],
@@ -48,7 +42,7 @@ class Admin {
         <div class="wrap kresuber-wrap">
             <div class="k-header">
                 <div class="k-brand">
-                    <h1>Kresuber POS Pro <span class="k-badge">v1.6.0</span></h1>
+                    <h1>Kresuber POS Pro <span class="k-badge">v1.6.1</span></h1>
                     <p>Solusi Kasir Terintegrasi WooCommerce</p>
                 </div>
                 <a href="<?php echo home_url('/pos'); ?>" target="_blank" class="k-btn-launch">
@@ -62,7 +56,7 @@ class Admin {
                 <?php settings_fields('kresuber_pos_settings'); do_settings_sections('kresuber_pos_settings'); ?>
                 
                 <div class="k-grid">
-                    <!-- Branding Card -->
+                    <!-- Branding -->
                     <div class="k-card">
                         <div class="k-card-header"><span class="dashicons dashicons-art"></span> Branding & Tema</div>
                         <div class="k-card-body">
@@ -73,7 +67,6 @@ class Admin {
                                         <option value="<?php echo $key; ?>" <?php selected($theme, $key); ?>><?php echo $val['label']; ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <p class="k-desc">Warna aplikasi POS akan menyesuaikan jenis usaha.</p>
                             </div>
                             <div class="k-form-group">
                                 <label>Logo Toko</label>
@@ -88,15 +81,15 @@ class Admin {
                         </div>
                     </div>
 
-                    <!-- Hardware Card -->
+                    <!-- Hardware -->
                     <div class="k-card">
                         <div class="k-card-header"><span class="dashicons dashicons-printer"></span> Hardware & Pembayaran</div>
                         <div class="k-card-body">
                             <div class="k-form-group">
                                 <label>Printer Thermal</label>
                                 <select name="kresuber_printer_width" class="k-input">
-                                    <option value="58mm" <?php selected($width, '58mm'); ?>>58mm (Bluetooth/USB Portable)</option>
-                                    <option value="80mm" <?php selected($width, '80mm'); ?>>80mm (Desktop Standard)</option>
+                                    <option value="58mm" <?php selected($width, '58mm'); ?>>58mm (Portable)</option>
+                                    <option value="80mm" <?php selected($width, '80mm'); ?>>80mm (Desktop)</option>
                                 </select>
                             </div>
                             <div class="k-form-group">
@@ -112,11 +105,11 @@ class Admin {
                         </div>
                     </div>
 
-                    <!-- Cashier Card -->
+                    <!-- Cashier -->
                     <div class="k-card full-width">
                         <div class="k-card-header"><span class="dashicons dashicons-id"></span> Manajemen Kasir</div>
                         <div class="k-card-body">
-                            <p class="k-desc">Masukkan nama kasir yang bertugas (pisahkan dengan koma).</p>
+                            <p class="k-desc">Masukkan nama kasir (pisahkan dengan koma).</p>
                             <?php $cashier_str = implode(', ', json_decode($cashiers) ?: []); ?>
                             <textarea id="cashier_input" class="large-text code" rows="3"><?php echo esc_textarea($cashier_str); ?></textarea>
                             <input type="hidden" name="kresuber_cashiers" id="kresuber_cashiers_json" value="<?php echo esc_attr($cashiers); ?>">

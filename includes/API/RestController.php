@@ -16,7 +16,6 @@ class RestController extends WP_REST_Controller {
     public function perm() { return current_user_can('manage_woocommerce'); }
 
     public function get_products($r) {
-        // Optimized query for large catalogs
         $products = wc_get_products(['limit' => -1, 'status' => 'publish']);
         $data = [];
         foreach($products as $p) {
@@ -36,7 +35,7 @@ class RestController extends WP_REST_Controller {
                 'stock'=>$p->get_stock_quantity() ?? 9999, 
                 'stock_status'=>$p->get_stock_status(),
                 'sku'=>(string)$p->get_sku(), 
-                'barcode'=>(string)$p->get_meta('_barcode'), // Custom field barcode support
+                'barcode'=>(string)$p->get_meta('_barcode'),
                 'category_slug'=>$c_slug, 
                 'category_name'=>$c_name
             ];
@@ -77,13 +76,12 @@ class RestController extends WP_REST_Controller {
             $order->set_payment_method($method);
             $order->set_payment_method_title(ucfirst($method));
             
-            // Save POS Metadata
             $order->add_meta_data('_pos_cashier', $p['cashier'] ?? 'Unknown');
             $order->add_meta_data('_pos_amount_paid', $p['amount_tendered']);
             $order->add_meta_data('_pos_change', $p['change']);
             
             $order->calculate_totals(); 
-            $order->payment_complete(); // This triggers stock reduction
+            $order->payment_complete();
             
             return rest_ensure_response([
                 'success'=>true, 
@@ -91,7 +89,7 @@ class RestController extends WP_REST_Controller {
                 'total'=>$order->get_total(),
                 'date'=>$order->get_date_created()->date('Y-m-d H:i:s')
             ]);
-        } catch(\\Exception $e) { 
+        } catch(\Exception $e) { 
             return new WP_Error('err', $e->getMessage()); 
         }
     }
