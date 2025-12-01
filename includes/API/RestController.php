@@ -1,133 +1,248 @@
 <?php
 namespace Kresuber\POS_Pro\API;
-use WP_Error, WP_REST_Controller, WP_REST_Server;
 
-if ( ! defined( 'ABSPATH' ) ) exit;
+use WP_Error;
+use WP_REST_Controller;
+use WP_REST_Server;
+use WC_Order;
+use WC_Product;
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 
 class RestController extends WP_REST_Controller {
     protected $namespace = 'kresuber-pos/v1';
 
     public function register_routes() {
-        register_rest_route( $this->namespace, '/products', [ 'methods' => 'GET', 'callback' => [ $this, 'get_products' ], 'permission_callback' => [ $this, 'perm' ] ] );
-        register_rest_route( $this->namespace, '/orders', [ 'methods' => 'GET', 'callback' => [ $this, 'get_orders' ], 'permission_callback' => [ $this, 'perm' ] ] );
-        register_rest_route( $this->namespace, '/order', [ 'methods' => 'POST', 'callback' => [ $this, 'create_order' ], 'permission_callback' => [ $this, 'perm' ] ] );
+        // Route: Ambil Data Produk (Mendukung Caching)
+        register_rest_route( $this->namespace, '/products', [
+            'methods'             => 'GET',
+            'callback'            => [ $this, 'get_products' ],
+            'permission_callback' => [ $this, 'check_permission' ],
+        ] );
+
+        // Route: Buat Pesanan Baru
+        register_rest_route( $this->namespace, '/order', [
+            'methods'             => 'POST',
+            'callback'            => [ $this, 'create_order' ],
+            'permission_callback' => [ $this, 'check_permission' ],
+            'args'                => [
+                'items' => [
+                    'required' => true,
+                    'validate_callback' => function($param) {
+                        return is_array($param) && !empty($param);
+                    }
+                ]
+            ]
+        ] );
+
+        // Route: Riwayat Pesanan
+        register_rest_route( $this->namespace, '/orders', [
+            'methods'             => 'GET',
+            'callback'            => [ $this, 'get_orders' ],
+            'permission_callback' => [ $this, 'check_permission' ],
+        ] );
     }
 
-    // FIX: Izinkan 'edit_shop_orders' agar Kasir (Non-Admin) bisa akses, tidak hanya 'manage_woocommerce'
-    public function perm() { 
-        return current_user_can('manage_woocommerce') || current_user_can('edit_shop_orders'); 
+    /**
+     * Cek permission: Shop Manager atau Admin
+     * Kita izinkan 'edit_shop_orders' agar role Shop Manager/Kasir bisa akses.
+     */
+    public function check_permission() {
+        return current_user_can( 'manage_woocommerce' ) || current_user_can( 'edit_shop_orders' );
     }
 
-    public function get_products($r) {
+    /**
+     * 1. GET PRODUCTS
+     * Mengambil semua produk dengan optimasi memori dan caching.
+     */
+    public function get_products( $request ) {
         global $wpdb;
 
-        // --- OPTIMASI CACHE START ---
-        $last_db_mod = $wpdb->get_var("SELECT MAX(post_modified) FROM $wpdb->posts WHERE post_type = 'product' AND post_status = 'publish'");
-        $cache_key = 'kresuber_pos_products_data';
-        $ver_key   = 'kresuber_pos_products_ver';
+        // Cek Cache Version berdasarkan waktu update terakhir produk di DB
+        // Query ini aman untuk Products (karena Products masih menggunakan tabel posts standar di WP saat ini)
+        $last_update = $wpdb->get_var( "SELECT MAX(post_modified) FROM {$wpdb->posts} WHERE post_type = 'product'" );
+        $cache_key   = 'kresuber_pos_products_full';
+        $ver_key     = 'kresuber_pos_ver';
         
-        $cached_data = get_transient($cache_key);
-        $cached_ver  = get_transient($ver_key);
+        $cached_data = get_transient( $cache_key );
+        $cached_ver  = get_transient( $ver_key );
 
-        if ($cached_data && $cached_ver === $last_db_mod && !isset($r['force'])) {
-            return rest_ensure_response($cached_data);
+        // Jika cache ada, versinya sama, dan tidak dipaksa reload -> Return Cache
+        if ( $cached_data && $cached_ver == $last_update && ! isset( $request['force'] ) ) {
+            return rest_ensure_response( $cached_data );
         }
 
-        // RESOURCE BOOST: Mencegah timeout saat memuat ribuan produk
-        if (function_exists('set_time_limit')) set_time_limit(0);
-        if (function_exists('ini_set')) ini_set('memory_limit', '512M');
+        // Persiapan Heavy Lifting
+        if ( function_exists( 'set_time_limit' ) ) set_time_limit( 0 );
+        if ( function_exists( 'ini_set' ) ) ini_set( 'memory_limit', '512M' );
 
-        $products = wc_get_products(['limit' => -1, 'status' => 'publish']);
+        // Ambil Produk via WC CRUD (HPOS Safe)
+        // limit -1 untuk mengambil semua (hati-hati jika produk > 5000, sebaiknya pagination di masa depan)
+        $products = wc_get_products( [
+            'limit'  => -1,
+            'status' => 'publish',
+        ] );
+
         $data = [];
-        
-        foreach($products as $p) {
-            // FIX: Validasi image ID untuk mencegah query lambat
-            $img_id = $p->get_image_id();
-            $img = $img_id ? wp_get_attachment_image_url($img_id, 'medium') : wc_placeholder_img_src();
+        foreach ( $products as $product ) {
+            // Skip jika bukan produk (safety check)
+            if ( ! is_a( $product, 'WC_Product' ) ) continue;
+
+            // Gambar
+            $img_id = $product->get_image_id();
+            $img_url = $img_id ? wp_get_attachment_image_url( $img_id, 'medium' ) : wc_placeholder_img_src();
+
+            // Kategori (Ambil yang pertama saja untuk grouping di POS)
+            $cat_ids = $product->get_category_ids();
+            $cat_slug = 'lainnya';
+            $cat_name = 'Lainnya';
             
-            // FIX CRITICAL: Validasi get_term agar tidak crash jika kategori error/terhapus
-            $cats = $p->get_category_ids();
-            $c_slug = 'lainnya'; $c_name = 'Lainnya';
-            
-            if(!empty($cats)) {
-                $t = get_term($cats[0], 'product_cat');
-                if ($t && !is_wp_error($t)) { // Tambahan cek !is_wp_error
-                    $c_slug = $t->slug;
-                    $c_name = $t->name;
+            if ( ! empty( $cat_ids ) ) {
+                $term = get_term( $cat_ids[0], 'product_cat' );
+                if ( $term && ! is_wp_error( $term ) ) {
+                    $cat_slug = $term->slug;
+                    $cat_name = $term->name;
                 }
             }
-            
+
+            // Variasi Harga (jika ada sale)
+            $price = (float) $product->get_price();
+            $reg_price = (float) $product->get_regular_price();
+            if ( ! $reg_price ) $reg_price = $price;
+
             $data[] = [
-                'id' => $p->get_id(), 
-                'name' => $p->get_name(), 
-                'price' => (float)$p->get_price(),
-                'image' => $img, 
-                'stock' => $p->get_stock_quantity() ?? 999, 
-                'stock_status' => $p->get_stock_status(),
-                'sku' => (string)$p->get_sku(), 
-                'barcode' => (string)$p->get_meta('_barcode'),
-                'category_slug' => $c_slug, 
-                'category_name' => $c_name
+                'id'            => $product->get_id(),
+                'name'          => $product->get_name(),
+                'sku'           => (string) $product->get_sku(),
+                'barcode'       => (string) $product->get_meta('_barcode'), // Meta barcode umum
+                'price'         => $price,
+                'regular_price' => $reg_price,
+                'stock'         => $product->get_stock_quantity() ?? 9999,
+                'stock_status'  => $product->get_stock_status(),
+                'image'         => $img_url,
+                'category_slug' => $cat_slug,
+                'category_name' => $cat_name,
+                'type'          => $product->get_type(),
             ];
         }
 
-        set_transient($cache_key, $data, 7 * DAY_IN_SECONDS);
-        set_transient($ver_key, $last_db_mod, 7 * DAY_IN_SECONDS);
-        // --- OPTIMASI CACHE END ---
+        // Simpan Cache selama 1 minggu (akan direfresh jika ada update produk)
+        set_transient( $cache_key, $data, 7 * DAY_IN_SECONDS );
+        set_transient( $ver_key, $last_update, 7 * DAY_IN_SECONDS );
 
-        return rest_ensure_response($data);
+        return rest_ensure_response( $data );
     }
 
-    public function get_orders($r) {
-        $orders = wc_get_orders(['limit'=>30, 'orderby'=>'date', 'order'=>'DESC']);
-        $data = [];
-        foreach($orders as $o) {
-            $items = [];
-            foreach($o->get_items() as $i) {
-                $items[] = [ 'name' => $i->get_name(), 'qty' => $i->get_quantity() ];
-            }
-            $data[] = [
-                'id' => $o->get_id(), 
-                'number' => $o->get_order_number(), 
-                'status' => $o->get_status(),
-                'total_formatted' => strip_tags($o->get_formatted_order_total()),
-                'date' => $o->get_date_created()->date('d/m/y H:i'),
-                'customer' => $o->get_formatted_billing_full_name() ?: 'Walk-in',
-                'items' => $items
-            ];
+    /**
+     * 2. CREATE ORDER
+     * Membuat order WooCommerce standard yang mengurangi stok (HPOS Compliant).
+     */
+    public function create_order( $request ) {
+        $params = $request->get_json_params();
+        
+        if ( empty( $params['items'] ) ) {
+            return new WP_Error( 'no_items', 'Keranjang kosong', [ 'status' => 400 ] );
         }
-        return rest_ensure_response($data);
-    }
 
-    public function create_order($r) {
-        $p = $r->get_json_params();
         try {
-            $order = wc_create_order(['customer_id'=>0]);
-            foreach($p['items'] as $i) { 
-                $prod=wc_get_product(intval($i['id'])); 
-                if($prod) $order->add_product($prod, intval($i['qty'])); 
-            }
+            // Buat Objek Order Baru (HPOS Compatible)
+            $order = wc_create_order();
             
-            $order->set_billing_first_name('Walk-in'); 
-            $order->set_payment_method($p['payment_method']??'cash');
-            
-            // Simpan info pembayaran (Tunai/Kembali) sebagai note
-            if(isset($p['amount_tendered'])) {
-                $note = "POS Transaction via " . strtoupper($p['payment_method']??'CASH');
-                if(($p['payment_method']??'') === 'cash') {
-                    $note .= ". Bayar: " . wc_price($p['amount_tendered']) . ", Kembali: " . wc_price($p['change']??0);
-                }
-                $order->add_order_note($note);
+            // Tambahkan Produk
+            foreach ( $params['items'] as $item ) {
+                $product = wc_get_product( $item['id'] );
+                if ( ! $product ) continue;
+                
+                // Tambahkan ke order (ID Produk, Qty)
+                $order->add_product( $product, intval( $item['qty'] ) );
             }
 
-            $order->calculate_totals(); 
-            $order->payment_complete();
+            // Data Kasir & Billing (Default Walk-in)
+            $cashier_name = isset( $params['cashier'] ) ? sanitize_text_field( $params['cashier'] ) : 'Kasir';
             
-            return rest_ensure_response([
-                'success'=>true, 
-                'order_number'=>$order->get_order_number(), 
-                'total'=>$order->get_total()
-            ]);
-        } catch( \Exception $e ) { return new WP_Error('err', $e->getMessage()); }
+            $order->set_billing_first_name( 'Walk-in' );
+            $order->set_billing_last_name( 'Customer' );
+            $order->set_billing_email( 'pos-order@local.store' );
+            $order->set_created_via( 'kresuber_pos' );
+            
+            // Metode Pembayaran
+            $payment_method = isset( $params['payment_method'] ) ? sanitize_text_field( $params['payment_method'] ) : 'cash';
+            $order->set_payment_method( $payment_method );
+            $order->set_payment_method_title( strtoupper( $payment_method ) );
+
+            // Hitung Total
+            $order->calculate_totals();
+
+            // Metadata Pembayaran (Tunai/Kembali) - HPOS Safe (menggunakan setter meta)
+            $tendered = isset( $params['amount_tendered'] ) ? floatval( $params['amount_tendered'] ) : 0;
+            $change   = isset( $params['change'] ) ? floatval( $params['change'] ) : 0;
+
+            if ( $payment_method === 'cash' && $tendered > 0 ) {
+                $order->add_meta_data( '_pos_cash_tendered', $tendered );
+                $order->add_meta_data( '_pos_cash_change', $change );
+                $note = sprintf( "POS Transaksi Tunai. Terima: %s, Kembali: %s. (Kasir: %s)", wc_price($tendered), wc_price($change), $cashier_name );
+            } else {
+                $note = sprintf( "POS Transaksi via %s. (Kasir: %s)", strtoupper($payment_method), $cashier_name );
+            }
+
+            $order->add_order_note( $note );
+
+            // Set Status & Kurangi Stok
+            // 'completed' secara otomatis mengurangi stok jika dikonfigurasi di WC, 
+            // tapi kita bisa paksa wc_reduce_stock_levels() untuk memastikan.
+            $order->update_status( 'completed', 'Order selesai via Kresuber POS.' );
+            
+            // Simpan Order (Penting untuk HPOS)
+            $order->save();
+
+            // Return Data Struk
+            return rest_ensure_response( [
+                'success'      => true,
+                'id'           => $order->get_id(),
+                'order_number' => $order->get_order_number(),
+                'total'        => $order->get_total(),
+                'date'         => $order->get_date_created()->date_i18n( 'd/m/Y H:i' ),
+                'cashier'      => $cashier_name
+            ] );
+
+        } catch ( \Exception $e ) {
+            return new WP_Error( 'order_failed', $e->getMessage(), [ 'status' => 500 ] );
+        }
+    }
+
+    /**
+     * 3. GET ORDERS HISTORY
+     * Mengambil riwayat order untuk ditampilkan di POS (HPOS Compliant).
+     */
+    public function get_orders( $request ) {
+        // Menggunakan wc_get_orders yang support HPOS dan Legacy
+        $orders = wc_get_orders( [
+            'limit'   => 20,
+            'orderby' => 'date',
+            'order'   => 'DESC',
+            'status'  => [ 'completed', 'processing' ],
+            'created_via' => 'kresuber_pos' // Filter khusus order POS jika didukung
+        ] );
+
+        $data = [];
+        foreach ( $orders as $order ) {
+            $items_list = [];
+            foreach ( $order->get_items() as $item ) {
+                $items_list[] = $item->get_name() . ' x' . $item->get_quantity();
+            }
+
+            $data[] = [
+                'id'              => $order->get_id(),
+                'number'          => $order->get_order_number(),
+                'status'          => $order->get_status(),
+                'total_formatted' => $order->get_formatted_order_total(),
+                'date'            => $order->get_date_created()->date_i18n( 'd/m/y H:i' ),
+                'items_summary'   => implode( ', ', $items_list )
+            ];
+        }
+
+        return rest_ensure_response( $data );
     }
 }
