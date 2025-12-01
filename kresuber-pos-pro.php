@@ -25,7 +25,7 @@ define( 'KRESUBER_POS_PRO_VERSION', '1.7.0' );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
-// Autoloader Sederhana & Cepat
+// Autoloader (Diperbaiki untuk Windows & Stabilitas)
 spl_autoload_register( function ( $class ) {
     $prefix = 'Kresuber\\POS_Pro\\';
     $base_dir = KRESUBER_POS_PRO_PATH . 'includes/';
@@ -39,12 +39,13 @@ spl_autoload_register( function ( $class ) {
     // Ambil nama relatif class
     $relative_class = substr( $class, $len );
     
-    // Mapping ke file path (namespace separator \ diganti directory separator /)
-    $file = $base_dir . str_replace( '\\', '/', $relative_class ) . '.php';
+    // Mapping ke file path
+    // Menggunakan DIRECTORY_SEPARATOR agar aman di Windows (D:\...) maupun Linux
+    $file = $base_dir . str_replace( '\\', DIRECTORY_SEPARATOR, $relative_class ) . '.php';
     
-    // Jika file ada, require
+    // Jika file ada, require. Jika tidak, jangan error dulu (biarkan autoload lain mencoba)
     if ( file_exists( $file ) ) {
-        require $file;
+        require_once $file;
     }
 } );
 
@@ -63,6 +64,7 @@ class Main {
 
     public function __construct() {
         add_action( 'plugins_loaded', [ $this, 'load_i18n' ] );
+        add_action( 'plugins_loaded', [ $this, 'init_updater' ] ); // Init Updater
         $this->init_hooks();
         
         // Auto-fix Rewrite Rules jika belum ada
@@ -77,28 +79,39 @@ class Main {
         );
     }
 
-    private function init_hooks() {
-        // 1. Admin Area
-        $admin = new Admin\Admin();
-        add_action( 'admin_menu', [ $admin, 'register_menu' ] );
-        add_action( 'admin_enqueue_scripts', [ $admin, 'enqueue_styles' ] );
-        add_action( 'admin_init', [ $admin, 'register_settings' ] );
-
-        // 2. REST API (Backend Logic)
-        $api = new API\RestController();
-        add_action( 'rest_api_init', [ $api, 'register_routes' ] );
-
-        // 3. Frontend (Aplikasi POS)
-        $ui = new Frontend\UI();
-        add_action( 'init', [ $ui, 'add_rewrite_rules' ] );
-        add_filter( 'query_vars', [ $ui, 'add_query_vars' ] );
-        // Prioritas 1 agar dieksekusi paling awal
-        add_action( 'template_redirect', [ $ui, 'load_pos_app' ], 1 );
+    public function init_updater() {
+        // Inisialisasi GitHub Updater
+        // Pastikan Anda membuat Release/Tag di GitHub (misal v1.7.1) agar terdeteksi
+        if ( class_exists( 'Kresuber\\POS_Pro\\Core\\Updater' ) ) {
+            new Core\Updater( __FILE__, 'febrisuryantoid/kresuber-pos-pro' );
+        }
     }
 
-    /**
-     * Self-Healing: Cek apakah rule POS ada, jika tidak, flush.
-     */
+    private function init_hooks() {
+        // 1. Admin Area
+        // Cek dulu apakah class ada sebelum dipanggil untuk menghindari Fatal Error
+        if ( class_exists( 'Kresuber\\POS_Pro\\Admin\\Admin' ) ) {
+            $admin = new Admin\Admin();
+            add_action( 'admin_menu', [ $admin, 'register_menu' ] );
+            add_action( 'admin_enqueue_scripts', [ $admin, 'enqueue_styles' ] );
+            add_action( 'admin_init', [ $admin, 'register_settings' ] );
+        }
+
+        // 2. REST API (Backend Logic)
+        if ( class_exists( 'Kresuber\\POS_Pro\\API\\RestController' ) ) {
+            $api = new API\RestController();
+            add_action( 'rest_api_init', [ $api, 'register_routes' ] );
+        }
+
+        // 3. Frontend (Aplikasi POS)
+        if ( class_exists( 'Kresuber\\POS_Pro\\Frontend\\UI' ) ) {
+            $ui = new Frontend\UI();
+            add_action( 'init', [ $ui, 'add_rewrite_rules' ] );
+            add_filter( 'query_vars', [ $ui, 'add_query_vars' ] );
+            add_action( 'template_redirect', [ $ui, 'load_pos_app' ], 1 );
+        }
+    }
+
     public function check_rewrite_rules() {
         $rules = get_option( 'rewrite_rules' );
         if ( ! isset( $rules['^pos/?$'] ) ) {
