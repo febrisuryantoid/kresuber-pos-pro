@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       Sistem Kasir (POS) Modern v1.6.1. Fitur: Tema Bisnis, Bluetooth Printer, QRIS, dan Manajemen Stok Realtime.
- * Version:           1.6.1
+ * Description:       Sistem Point of Sale (POS) profesional v1.7.0. Fitur: Non-blocking UI, Health Check, Barcode Scanner, Thermal Printer, dan QRIS.
+ * Version:           1.7.0
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
@@ -17,7 +17,8 @@ namespace Kresuber\POS_Pro;
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'KRESUBER_POS_PRO_VERSION', '1.6.1' );
+define( 'KRESUBER_POS_PRO_VERSION', '1.7.0' );
+define( 'KRESUBER_POS_PRO_FILE', __FILE__ );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
@@ -46,14 +47,17 @@ class Main {
     }
 
     private function init_hooks() {
+        // Admin
         $admin = new Admin\Admin();
         add_action( 'admin_menu', [ $admin, 'register_menu' ] );
         add_action( 'admin_enqueue_scripts', [ $admin, 'enqueue_styles' ] );
         add_action( 'admin_init', [ $admin, 'register_settings' ] );
 
+        // API
         $api = new API\RestController();
         add_action( 'rest_api_init', [ $api, 'register_routes' ] );
 
+        // Frontend
         $ui = new Frontend\UI();
         add_action( 'init', [ $ui, 'add_rewrite_rules' ] );
         add_filter( 'query_vars', [ $ui, 'add_query_vars' ] );
@@ -61,11 +65,8 @@ class Main {
     }
 }
 
-register_activation_hook( __FILE__, function() {
-    add_rewrite_rule('^pos/?$', 'index.php?kresuber_pos=1', 'top');
-    flush_rewrite_rules();
-});
-register_deactivation_hook( __FILE__, function() { flush_rewrite_rules(); });
+register_activation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Activator', 'activate' ] );
+register_deactivation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Deactivator', 'deactivate' ] );
 
 function kresuber_pos_pro_init() { return Main::instance(); }
 kresuber_pos_pro_init();

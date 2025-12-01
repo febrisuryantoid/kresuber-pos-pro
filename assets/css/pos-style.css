@@ -1,1 +1,1 @@
-/* Custom overrides */
+[v-cloak]{display:none!important}.custom-scrollbar::-webkit-scrollbar{width:4px;height:4px}.custom-scrollbar::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px}.no-scrollbar::-webkit-scrollbar{display:none}@media print{body *{visibility:hidden;height:0;overflow:hidden}#print,#print *{visibility:visible;height:auto;overflow:visible}#print{position:absolute;left:0;top:0;width:100%}}
