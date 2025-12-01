@@ -1,1 +1,0 @@
-<?php namespace Kresuber\POS_Pro\Core; if(!defined('ABSPATH')) exit; class Activator { public static function activate() { add_rewrite_rule('^pos/?$', 'index.php?kresuber_pos=1', 'top'); flush_rewrite_rules(); $r=get_role('administrator'); if($r){ $r->add_cap('kresuber_pos_manage'); $r->add_cap('kresuber_pos_cashier'); } } }
