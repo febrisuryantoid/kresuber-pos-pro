@@ -8,9 +8,13 @@ class RestController extends WP_REST_Controller {
     protected $namespace = 'kresuber-pos/v1';
 
     public function register_routes() {
+        // Products
         register_rest_route( $this->namespace, '/products', [ 'methods' => 'GET', 'callback' => [ $this, 'get_products' ], 'permission_callback' => [ $this, 'perm' ] ] );
+        // Orders
         register_rest_route( $this->namespace, '/orders', [ 'methods' => 'GET', 'callback' => [ $this, 'get_orders' ], 'permission_callback' => [ $this, 'perm' ] ] );
         register_rest_route( $this->namespace, '/order', [ 'methods' => 'POST', 'callback' => [ $this, 'create_order' ], 'permission_callback' => [ $this, 'perm' ] ] );
+        // Analytics
+        register_rest_route( $this->namespace, '/analytics', [ 'methods' => 'GET', 'callback' => [ $this, 'get_analytics' ], 'permission_callback' => [ $this, 'perm' ] ] );
     }
 
     public function perm() { return current_user_can('manage_woocommerce'); }
@@ -23,26 +27,18 @@ class RestController extends WP_REST_Controller {
             $cats = $p->get_category_ids();
             $c_slug = 'lainnya'; $c_name = 'Lainnya';
             if(!empty($cats) && ($t=get_term($cats[0], 'product_cat'))) { $c_slug=$t->slug; $c_name=$t->name; }
-            
-            // FIX: Ensure numerical values are cast to float/int to avoid NaN in JS
             $data[] = [
-                'id' => $p->get_id(),
-                'name' => $p->get_name(),
-                'price' => (float) $p->get_price(), // Cast to float
-                'regular_price' => (float) $p->get_regular_price(),
-                'image' => $img,
-                'stock' => $p->get_stock_quantity() ?? 9999,
-                'stock_status' => $p->get_stock_status(),
-                'sku' => (string) $p->get_sku(),
-                'barcode' => (string) $p->get_meta('_barcode'),
-                'category_slug' => $c_slug,
-                'category_name' => $c_name
+                'id'=>$p->get_id(), 'name'=>$p->get_name(), 'price'=>(float)$p->get_price(),
+                'image'=>$img, 'stock'=>$p->get_stock_quantity()??999, 'stock_status'=>$p->get_stock_status(),
+                'sku'=>(string)$p->get_sku(), 'barcode'=>(string)$p->get_meta('_barcode'),
+                'category_slug'=>$c_slug, 'category_name'=>$c_name
             ];
         }
         return rest_ensure_response($data);
     }
 
     public function get_orders($r) {
+        // FIX: Return clean array for items, no HTML string
         $orders = wc_get_orders(['limit'=>30, 'orderby'=>'date', 'order'=>'DESC']);
         $data = [];
         foreach($orders as $o) {
@@ -53,6 +49,7 @@ class RestController extends WP_REST_Controller {
                     'qty'  => $i->get_quantity()
                 ];
             }
+            
             $data[] = [
                 'id' => $o->get_id(),
                 'number' => $o->get_order_number(),
@@ -60,20 +57,26 @@ class RestController extends WP_REST_Controller {
                 'total_formatted' => strip_tags($o->get_formatted_order_total()),
                 'date' => $o->get_date_created()->date('d/m/y H:i'),
                 'customer' => $o->get_formatted_billing_full_name() ?: 'Walk-in',
-                'items' => $items
+                'items' => $items 
             ];
         }
         return rest_ensure_response($data);
+    }
+    
+    public function get_analytics($r) {
+        // Simple daily stats
+        $today = date('Y-m-d');
+        $orders = wc_get_orders(['date_created'=>"$today...$today", 'limit'=>-1]);
+        $total = 0; $count = 0;
+        foreach($orders as $o) { $total += $o->get_total(); $count++; }
+        return rest_ensure_response(['sales'=>$total, 'count'=>$count]);
     }
 
     public function create_order($r) {
         $p = $r->get_json_params();
         try {
             $order = wc_create_order(['customer_id'=>0]);
-            foreach($p['items'] as $i) { 
-                $prod=wc_get_product(intval($i['id'])); 
-                if($prod) $order->add_product($prod, intval($i['qty'])); 
-            }
+            foreach($p['items'] as $i) { $prod=wc_get_product(intval($i['id'])); if($prod) $order->add_product($prod, intval($i['qty'])); }
             $order->set_billing_first_name('Walk-in');
             $order->set_payment_method($p['payment_method']??'cash');
             $order->calculate_totals(); 

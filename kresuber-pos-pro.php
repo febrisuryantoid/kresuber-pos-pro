@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       Sistem Point of Sale (POS) Modern v1.7.1. Dashboard SaaS, Kamera Barcode Scanner, & Fix Kalkulasi.
- * Version:           1.7.1
+ * Description:       Enterprise-grade POS System for WooCommerce. Features: Multi-theme, Analytics Dashboard, Offline-first.
+ * Version:           1.7.0
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
@@ -17,10 +17,11 @@ namespace Kresuber\POS_Pro;
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'KRESUBER_POS_PRO_VERSION', '1.7.1' );
+define( 'KRESUBER_POS_PRO_VERSION', '1.7.0' );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
+// PSR-4 Autoloader
 spl_autoload_register( function ( $class ) {
     $prefix = 'Kresuber\\POS_Pro\\';
     $base_dir = KRESUBER_POS_PRO_PATH . 'includes/';
@@ -34,11 +35,16 @@ spl_autoload_register( function ( $class ) {
 class Main {
     private static $instance = null;
     public static function instance() { if ( is_null( self::$instance ) ) self::$instance = new self(); return self::$instance; }
+
     public function __construct() {
         add_action( 'plugins_loaded', [ $this, 'load_i18n' ] );
         $this->init_hooks();
     }
-    public function load_i18n() { load_plugin_textdomain( 'kresuber-pos-pro', false, dirname( plugin_basename( __FILE__ ) ) . '/languages/' ); }
+
+    public function load_i18n() {
+        load_plugin_textdomain( 'kresuber-pos-pro', false, dirname( plugin_basename( __FILE__ ) ) . '/languages/' );
+    }
+
     private function init_hooks() {
         $admin = new Admin\Admin();
         add_action( 'admin_menu', [ $admin, 'register_menu' ] );
