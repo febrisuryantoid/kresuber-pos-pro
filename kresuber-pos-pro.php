@@ -64,6 +64,9 @@ class Main {
     public function __construct() {
         add_action( 'plugins_loaded', [ $this, 'load_i18n' ] );
         $this->init_hooks();
+        
+        // Auto-fix Rewrite Rules jika belum ada
+        add_action( 'admin_init', [ $this, 'check_rewrite_rules' ] );
     }
 
     public function load_i18n() {
@@ -89,7 +92,19 @@ class Main {
         $ui = new Frontend\UI();
         add_action( 'init', [ $ui, 'add_rewrite_rules' ] );
         add_filter( 'query_vars', [ $ui, 'add_query_vars' ] );
-        add_action( 'template_redirect', [ $ui, 'load_pos_app' ] );
+        // Prioritas 1 agar dieksekusi paling awal
+        add_action( 'template_redirect', [ $ui, 'load_pos_app' ], 1 );
+    }
+
+    /**
+     * Self-Healing: Cek apakah rule POS ada, jika tidak, flush.
+     */
+    public function check_rewrite_rules() {
+        $rules = get_option( 'rewrite_rules' );
+        if ( ! isset( $rules['^pos/?$'] ) ) {
+            global $wp_rewrite;
+            $wp_rewrite->flush_rules();
+        }
     }
 }
 

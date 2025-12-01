@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-    <title>Kresuber POS</title>
+    <title><?php echo esc_html( $kresuber_config['site_name'] ); ?> - POS</title>
     
     <!-- Libraries (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -17,7 +17,7 @@
     
     <link rel="stylesheet" href="<?php echo KRESUBER_POS_PRO_URL; ?>assets/css/pos-style.css?v=<?php echo KRESUBER_POS_PRO_VERSION; ?>">
     <style>
-        :root { --primary: <?php echo isset($kresuber_config['theme_color']) ? $kresuber_config['theme_color'] : '#00A78E'; ?>; }
+        :root { --primary: <?php echo esc_attr( $kresuber_config['theme_color'] ); ?>; }
         .text-theme { color: var(--primary); }
         .bg-theme { background-color: var(--primary); }
         .ring-theme { --tw-ring-color: var(--primary); }
