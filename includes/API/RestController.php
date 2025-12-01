@@ -18,7 +18,6 @@ class RestController extends WP_REST_Controller {
         register_rest_route( $this->namespace, '/order', [
             'methods' => WP_REST_Server::CREATABLE, 'callback' => [ $this, 'create_order' ], 'permission_callback' => [ $this, 'check_permission' ],
         ]);
-        // NEW: Endpoint Riwayat Order
         register_rest_route( $this->namespace, '/orders', [
             'methods' => WP_REST_Server::READABLE, 'callback' => [ $this, 'get_recent_orders' ], 'permission_callback' => [ $this, 'check_permission' ],
         ]);
@@ -26,32 +25,23 @@ class RestController extends WP_REST_Controller {
 
     public function check_permission() { return current_user_can( 'manage_woocommerce' ); }
 
-    // ... (get_products sama seperti sebelumnya) ...
     public function get_products( $request ) {
-        $args = [ 'limit' => -1, 'status' => 'publish' ];
-        $products = wc_get_products( $args );
+        $products = wc_get_products( [ 'limit' => -1, 'status' => 'publish' ] );
         $data = [];
         foreach ( $products as $product ) {
-            $image_id = $product->get_image_id();
-            $image_url = $image_id ? wp_get_attachment_image_url( $image_id, 'medium' ) : wc_placeholder_img_src(); // Changed to medium for better quality
-            
+            $img_id = $product->get_image_id();
             $cats = $product->get_category_ids();
-            $cat_slug = 'uncategorized';
-            $cat_name = 'Lainnya';
-            if ( ! empty( $cats ) ) {
-                $term = get_term( $cats[0], 'product_cat' );
-                if ( $term && ! is_wp_error( $term ) ) {
-                    $cat_slug = $term->slug;
-                    $cat_name = $term->name;
-                }
+            $cat_slug = 'uncategorized'; $cat_name = 'Lainnya';
+            if(!empty($cats) && ($term = get_term($cats[0], 'product_cat'))) {
+                $cat_slug = $term->slug; $cat_name = $term->name;
             }
-
+            
             $data[] = [
                 'id' => $product->get_id(),
                 'name' => $product->get_name(),
                 'price' => (float) $product->get_price(),
                 'regular_price' => (float) $product->get_regular_price(),
-                'image' => $image_url,
+                'image' => $img_id ? wp_get_attachment_image_url( $img_id, 'medium' ) : wc_placeholder_img_src(),
                 'stock' => $product->get_stock_quantity() ?? 999,
                 'stock_status' => $product->get_stock_status(),
                 'sku' => (string) $product->get_sku(),
@@ -63,41 +53,29 @@ class RestController extends WP_REST_Controller {
         return rest_ensure_response( $data );
     }
 
-    // NEW FUNCTION: Ambil Order Terakhir
     public function get_recent_orders( $request ) {
-        $args = [
-            'limit' => 20, // Ambil 20 transaksi terakhir
-            'orderby' => 'date',
-            'order' => 'DESC',
-            'status' => 'any'
-        ];
-        $orders = wc_get_orders( $args );
+        $orders = wc_get_orders( [ 'limit' => 20, 'orderby' => 'date', 'order' => 'DESC' ] );
         $data = [];
-
         foreach ( $orders as $order ) {
-            $items_text = [];
-            foreach ( $order->get_items() as $item ) {
-                $items_text[] = $item->get_name() . ' x' . $item->get_quantity();
-            }
-
+            $items = [];
+            foreach($order->get_items() as $i) $items[] = $i->get_name() . ' x' . $i->get_quantity();
+            
             $data[] = [
                 'id' => $order->get_id(),
                 'number' => $order->get_order_number(),
                 'status' => $order->get_status(),
                 'total' => $order->get_formatted_order_total(),
                 'date' => $order->get_date_created()->date('d M Y H:i'),
-                'customer' => $order->get_formatted_billing_full_name() ?: 'Walk-in Customer',
-                'items_summary' => implode(', ', $items_text),
-                'payment_method' => $order->get_payment_method_title()
+                'customer' => $order->get_formatted_billing_full_name() ?: 'Walk-in',
+                'items_summary' => implode(', ', $items),
             ];
         }
         return rest_ensure_response( $data );
     }
 
-    // ... (create_order sama seperti sebelumnya, pastikan disalin) ...
     public function create_order( $request ) {
         $params = $request->get_json_params();
-        if ( empty( $params['items'] ) ) return new WP_Error( 'no_items', 'Keranjang kosong.', [ 'status' => 400 ] );
+        if ( empty( $params['items'] ) ) return new WP_Error( 'no_items', 'Keranjang kosong', [ 'status' => 400 ] );
 
         try {
             $order = wc_create_order( [ 'customer_id' => 0 ] );
@@ -105,21 +83,18 @@ class RestController extends WP_REST_Controller {
                 $product = wc_get_product( intval( $item['id'] ) );
                 if ( $product ) $order->add_product( $product, intval( $item['qty'] ) );
             }
-            $order->set_billing_first_name( 'Walk-in' );
-            $order->set_billing_last_name( 'Customer' );
+            $order->set_billing_first_name('Walk-in'); $order->set_billing_last_name('Customer');
             $order->set_payment_method( $params['payment_method'] ?? 'cash' );
             $order->calculate_totals();
             $order->payment_complete();
             $order->update_status( 'completed', 'POS Order' );
 
-            return rest_ensure_response( [
+            return rest_ensure_response([
                 'success' => true,
                 'order_number' => $order->get_order_number(),
                 'total' => $order->get_total(),
                 'date' => $order->get_date_created()->date( 'Y-m-d H:i:s' )
             ]);
-        } catch ( \Exception $e ) {
-            return new WP_Error( 'error', $e->getMessage() );
-        }
+        } catch ( \Exception $e ) { return new WP_Error( 'error', $e->getMessage() ); }
     }
 }

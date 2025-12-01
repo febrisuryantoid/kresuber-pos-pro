@@ -1,11 +1,1 @@
-<?php
-namespace Kresuber\POS_Pro\Core;
-
-if ( ! defined( 'ABSPATH' ) ) exit;
-
-class Activator {
-	public static function activate() {
-		add_rewrite_rule( '^pos/?$', 'index.php?kresuber_pos=1', 'top' );
-		flush_rewrite_rules();
-	}
-}
+<?php namespace Kresuber\POS_Pro\Core; class Activator { public static function activate() { add_rewrite_rule( '^pos/?$', 'index.php?kresuber_pos=1', 'top' ); flush_rewrite_rules(); } }

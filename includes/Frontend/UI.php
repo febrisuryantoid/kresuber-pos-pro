@@ -10,29 +10,25 @@ class UI {
     public function load_pos_app() {
         if ( get_query_var( 'kresuber_pos' ) == 1 ) {
             
-            // Cek Login
             if ( ! is_user_logged_in() ) {
                 auth_redirect();
                 exit;
             }
 
-            // Cek Hak Akses
             if ( ! current_user_can( 'manage_woocommerce' ) ) {
-                wp_die( '<h1>Akses Ditolak</h1><p>Hanya Shop Manager/Admin yang bisa mengakses POS.</p>', 403 );
+                wp_die( '<h1>Akses Ditolak</h1><p>Hanya admin/kasir yang diizinkan.</p>', 403 );
             }
 
-            // Ambil QRIS
-            $qris_url = get_option( 'kresuber_qris_image', '' );
-            global $kresuber_qris_url; 
-            $kresuber_qris_url = $qris_url;
+            // Ambil QRIS URL
+            global $kresuber_qris_url;
+            $kresuber_qris_url = get_option( 'kresuber_qris_image', '' );
 
-            // Load Template
             $template = KRESUBER_POS_PRO_PATH . 'templates/app.php';
             if ( file_exists( $template ) ) {
                 include $template;
                 exit;
             } else {
-                wp_die( "Error: Template file not found at $template" );
+                wp_die("Error: Template file tidak ditemukan.");
             }
         }
     }
