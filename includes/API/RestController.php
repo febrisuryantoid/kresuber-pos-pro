@@ -8,13 +8,9 @@ class RestController extends WP_REST_Controller {
     protected $namespace = 'kresuber-pos/v1';
 
     public function register_routes() {
-        // Products
         register_rest_route( $this->namespace, '/products', [ 'methods' => 'GET', 'callback' => [ $this, 'get_products' ], 'permission_callback' => [ $this, 'perm' ] ] );
-        // Orders
         register_rest_route( $this->namespace, '/orders', [ 'methods' => 'GET', 'callback' => [ $this, 'get_orders' ], 'permission_callback' => [ $this, 'perm' ] ] );
         register_rest_route( $this->namespace, '/order', [ 'methods' => 'POST', 'callback' => [ $this, 'create_order' ], 'permission_callback' => [ $this, 'perm' ] ] );
-        // Analytics
-        register_rest_route( $this->namespace, '/analytics', [ 'methods' => 'GET', 'callback' => [ $this, 'get_analytics' ], 'permission_callback' => [ $this, 'perm' ] ] );
     }
 
     public function perm() { return current_user_can('manage_woocommerce'); }
@@ -38,38 +34,22 @@ class RestController extends WP_REST_Controller {
     }
 
     public function get_orders($r) {
-        // FIX: Return clean array for items, no HTML string
         $orders = wc_get_orders(['limit'=>30, 'orderby'=>'date', 'order'=>'DESC']);
         $data = [];
         foreach($orders as $o) {
             $items = [];
             foreach($o->get_items() as $i) {
-                $items[] = [
-                    'name' => $i->get_name(),
-                    'qty'  => $i->get_quantity()
-                ];
+                $items[] = [ 'name' => $i->get_name(), 'qty' => $i->get_quantity() ];
             }
-            
             $data[] = [
-                'id' => $o->get_id(),
-                'number' => $o->get_order_number(),
-                'status' => $o->get_status(),
+                'id' => $o->get_id(), 'number' => $o->get_order_number(), 'status' => $o->get_status(),
                 'total_formatted' => strip_tags($o->get_formatted_order_total()),
                 'date' => $o->get_date_created()->date('d/m/y H:i'),
                 'customer' => $o->get_formatted_billing_full_name() ?: 'Walk-in',
-                'items' => $items 
+                'items' => $items
             ];
         }
         return rest_ensure_response($data);
-    }
-    
-    public function get_analytics($r) {
-        // Simple daily stats
-        $today = date('Y-m-d');
-        $orders = wc_get_orders(['date_created'=>"$today...$today", 'limit'=>-1]);
-        $total = 0; $count = 0;
-        foreach($orders as $o) { $total += $o->get_total(); $count++; }
-        return rest_ensure_response(['sales'=>$total, 'count'=>$count]);
     }
 
     public function create_order($r) {
@@ -77,10 +57,8 @@ class RestController extends WP_REST_Controller {
         try {
             $order = wc_create_order(['customer_id'=>0]);
             foreach($p['items'] as $i) { $prod=wc_get_product(intval($i['id'])); if($prod) $order->add_product($prod, intval($i['qty'])); }
-            $order->set_billing_first_name('Walk-in');
-            $order->set_payment_method($p['payment_method']??'cash');
-            $order->calculate_totals(); 
-            $order->payment_complete();
+            $order->set_billing_first_name('Walk-in'); $order->set_payment_method($p['payment_method']??'cash');
+            $order->calculate_totals(); $order->payment_complete();
             return rest_ensure_response(['success'=>true, 'order_number'=>$order->get_order_number(), 'total'=>$order->get_total()]);
         } catch( \Exception $e ) { return new WP_Error('err', $e->getMessage()); }
     }
