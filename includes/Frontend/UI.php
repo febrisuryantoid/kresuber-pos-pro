@@ -9,27 +9,22 @@ class UI {
 
     public function load_pos_app() {
         if ( get_query_var( 'kresuber_pos' ) == 1 ) {
-            
-            if ( ! is_user_logged_in() ) {
-                auth_redirect();
-                exit;
-            }
+            if ( ! is_user_logged_in() ) { auth_redirect(); exit; }
+            if ( ! current_user_can( 'manage_woocommerce' ) ) { wp_die( 'Akses Ditolak', 403 ); }
 
-            if ( ! current_user_can( 'manage_woocommerce' ) ) {
-                wp_die( '<h1>Akses Ditolak</h1><p>Hanya admin/kasir yang diizinkan.</p>', 403 );
-            }
-
-            // Ambil QRIS URL
-            global $kresuber_qris_url;
-            $kresuber_qris_url = get_option( 'kresuber_qris_image', '' );
+            // Global Config Injection
+            global $kresuber_config;
+            $kresuber_config = [
+                'logo' => get_option( 'kresuber_pos_logo', '' ),
+                'qris' => get_option( 'kresuber_qris_image', '' ),
+                'printer_width' => get_option( 'kresuber_printer_width', '58mm' ),
+                'printer_conn' => get_option( 'kresuber_printer_conn', 'browser' ),
+                'cashiers' => json_decode( get_option( 'kresuber_cashiers', '[]' ) )
+            ];
 
             $template = KRESUBER_POS_PRO_PATH . 'templates/app.php';
-            if ( file_exists( $template ) ) {
-                include $template;
-                exit;
-            } else {
-                wp_die("Error: Template file tidak ditemukan.");
-            }
+            if ( file_exists( $template ) ) { include $template; exit; }
+            else { wp_die( "Template Missing." ); }
         }
     }
 }

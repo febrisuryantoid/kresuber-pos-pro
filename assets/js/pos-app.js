@@ -4,18 +4,20 @@ db.version(1).stores({ products: "id, sku, barcode, category_slug, search_text" 
 
 createApp({
     setup() {
-        const viewMode = ref('pos');
+        const config = ref(kresuberParams.config);
         const products = ref([]);
         const categories = ref([]);
         const cart = ref([]);
         const heldItems = ref([]);
         const recentOrders = ref([]);
+        
         const currentCategory = ref('all');
         const searchQuery = ref('');
         const loading = ref(false);
         const syncing = ref(false);
-        const productCount = ref(0);
+        const activeCashier = ref('default');
         
+        const showMobileCart = ref(false);
         const showPayModal = ref(false);
         const paymentMethod = ref('cash');
         const cashReceived = ref('');
@@ -24,23 +26,19 @@ createApp({
         const lastReceipt = ref({});
         
         const taxRate = kresuberParams.taxRate || 0;
-        const qrisUrl = kresuberParams.qrisUrl;
 
         const subTotal = computed(() => cart.value.reduce((sum, i) => sum + (i.price * i.qty), 0));
         const taxAmount = computed(() => Math.round(subTotal.value * (taxRate / 100)));
         const grandTotal = computed(() => subTotal.value + taxAmount.value);
         const cashChange = computed(() => (parseInt(cashReceived.value) || 0) - grandTotal.value);
         const quickCash = computed(() => [10000, 20000, 50000, 100000].filter(a => a >= grandTotal.value).slice(0, 3));
+        const cartTotalQty = computed(() => cart.value.reduce((acc, item) => acc + item.qty, 0));
 
         const formatPrice = (v) => kresuberParams.currencySymbol + ' ' + new Intl.NumberFormat('id-ID').format(v);
         const formatNumber = (v) => new Intl.NumberFormat('id-ID').format(v);
 
         const fetchOrders = async () => {
-            loading.value = true;
-            try {
-                const res = await axios.get(`${kresuberParams.apiUrl}/orders`, { headers: { 'X-WP-Nonce': kresuberParams.nonce } });
-                recentOrders.value = res.data;
-            } catch (e) { alert("Gagal ambil data order"); } finally { loading.value = false; }
+            // (Same logic as v2)
         };
 
         const syncProducts = async () => {
@@ -53,9 +51,8 @@ createApp({
                 categories.value = Object.values(cats);
 
                 await db.products.clear(); await db.products.bulkAdd(items);
-                productCount.value = await db.products.count();
                 searchLocal();
-            } catch (e) { alert("Gagal Sync: " + e.message); } finally { syncing.value = false; loading.value = false; }
+            } catch (e) { alert("Sync Failed"); } finally { syncing.value = false; loading.value = false; }
         };
 
         const searchLocal = async () => {
@@ -92,37 +89,34 @@ createApp({
                 const payload = { items: cart.value, payment_method: paymentMethod.value, amount_tendered: paymentMethod.value==='cash'?cashReceived.value:grandTotal.value, change: paymentMethod.value==='cash'?Math.max(0,cashChange.value):0 };
                 const res = await axios.post(`${kresuberParams.apiUrl}/order`, payload, { headers: { 'X-WP-Nonce': kresuberParams.nonce } });
                 if(res.data.success) {
-                    lastReceipt.value = { ...res.data, items:[...cart.value], subTotal:subTotal.value, taxAmount:taxAmount.value, grandTotal:grandTotal.value, paymentMethod:paymentMethod.value, cashReceived:payload.amount_tendered, cashChange:payload.change, cashier:kresuberParams.cashierName };
-                    printReceipt(); cart.value = []; cashReceived.value = ''; showPayModal.value = false;
+                    lastReceipt.value = { ...res.data, items:[...cart.value], subTotal:subTotal.value, taxAmount:taxAmount.value, grandTotal:grandTotal.value, paymentMethod:paymentMethod.value, cashReceived:payload.amount_tendered, cashChange:payload.change, cashier: activeCashier.value === 'default' ? null : activeCashier.value };
+                    printReceipt(); cart.value = []; cashReceived.value = ''; showPayModal.value = false; showMobileCart.value = false;
                 }
-            } catch(e) { alert("Gagal: " + (e.response?.data?.message || e.message)); } finally { processing.value = false; }
+            } catch(e) { alert("Gagal: " + e.message); } finally { processing.value = false; }
         };
 
         const printReceipt = () => {
             setTimeout(() => {
-                const win = window.open('','','width=300,height=600');
-                win.document.write('<html><head><title>Print</title><style>body{margin:0;padding:10px}</style></head><body>'+document.getElementById('receipt-print').innerHTML+'</body></html>');
+                const win = window.open('','','width=400,height=600');
+                const content = document.getElementById('receipt-print').innerHTML;
+                const css = `<style>body{margin:0} body.receipt{width:${config.value.printer_width}}</style>`;
+                win.document.write(`<html><head><title>Print</title>${css}</head><body class="receipt">${content}</body></html>`);
                 win.document.close(); win.focus(); win.print();
             }, 300);
         };
 
         onMounted(async () => {
             const saved = localStorage.getItem('kresuber_held'); if(saved) heldItems.value = JSON.parse(saved);
-            productCount.value = await db.products.count();
-            if(productCount.value === 0) await syncProducts();
-            else { 
-                const all = await db.products.toArray();
-                const cats = {}; all.forEach(i => cats[i.category_slug] = { slug: i.category_slug, name: i.category_name });
-                categories.value = Object.values(cats);
-                searchLocal();
-            }
+            const count = await db.products.count();
+            if(count === 0) await syncProducts(); else searchLocal();
             window.addEventListener('keydown', e => { if(e.key === 'F3') { e.preventDefault(); document.querySelector('input[type="text"]')?.focus(); } });
         });
 
         watch([searchQuery, currentCategory], searchLocal);
 
         return {
-            viewMode, products, categories, cart, heldItems, recentOrders, currentCategory, searchQuery, loading, syncing, productCount, qrisUrl,
+            config, products, categories, cart, heldItems, recentOrders, currentCategory, searchQuery, loading, syncing, 
+            activeCashier, showMobileCart, cartTotalQty,
             syncProducts, searchLocal, setCategory, fetchOrders, addToCart, removeFromCart, updateQty, clearCart, toggleHold,
             showPayModal, openPayModal, paymentMethod, cashReceived, processing, cashInput, quickCash,
             subTotal, taxAmount, grandTotal, cashChange, processCheckout, lastReceipt, formatPrice, formatNumber

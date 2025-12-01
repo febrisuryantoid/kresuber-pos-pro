@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       Sistem Point of Sale (POS) Modern untuk WooCommerce. Fitur: Barcode Scanner, Thermal Print, QRIS, Offline Mode.
- * Version:           2.0.2
+ * Description:       Aplikasi Kasir (POS) Responsif untuk WooCommerce. Fitur: Manajemen Kasir, Setting Printer Thermal, Logo Toko, dan Scan Barcode.
+ * Version:           3.0.0
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
@@ -15,18 +15,13 @@
 
 namespace Kresuber\POS_Pro;
 
-if ( ! defined( 'ABSPATH' ) ) {
-	exit;
-}
+if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'KRESUBER_POS_PRO_VERSION', '2.0.2' );
+define( 'KRESUBER_POS_PRO_VERSION', '3.0.0' );
 define( 'KRESUBER_POS_PRO_FILE', __FILE__ );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
-/**
- * Autoloader PSR-4
- */
 spl_autoload_register( function ( $class ) {
 	$prefix   = 'Kresuber\\POS_Pro\\';
 	$base_dir = KRESUBER_POS_PRO_PATH . 'includes/';
@@ -37,16 +32,9 @@ spl_autoload_register( function ( $class ) {
 	if ( file_exists( $file ) ) require $file;
 } );
 
-/**
- * Main Class
- */
 class Main {
 	private static $instance = null;
-
-	public static function instance() {
-		if ( is_null( self::$instance ) ) self::$instance = new self();
-		return self::$instance;
-	}
+	public static function instance() { if ( is_null( self::$instance ) ) self::$instance = new self(); return self::$instance; }
 
 	public function __construct() {
 		$this->load_dependencies();
@@ -59,17 +47,14 @@ class Main {
 	}
 
 	private function init_hooks() {
-        // Admin
 		$admin = new Admin\Admin();
 		add_action( 'admin_menu', [ $admin, 'register_menu' ] );
 		add_action( 'admin_enqueue_scripts', [ $admin, 'enqueue_styles' ] );
-        add_action( 'admin_init', [ $admin, 'register_settings' ] ); // FIX: Whitelist Settings
+        add_action( 'admin_init', [ $admin, 'register_settings' ] );
 
-        // API
 		$api = new API\RestController();
 		add_action( 'rest_api_init', [ $api, 'register_routes' ] );
 
-        // Frontend
 		$ui = new Frontend\UI();
 		add_action( 'init', [ $ui, 'add_rewrite_rules' ] );
 		add_filter( 'query_vars', [ $ui, 'add_query_vars' ] );
@@ -80,7 +65,5 @@ class Main {
 register_activation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Activator', 'activate' ] );
 register_deactivation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Deactivator', 'deactivate' ] );
 
-function kresuber_pos_pro_init() {
-	return Main::instance();
-}
+function kresuber_pos_pro_init() { return Main::instance(); }
 kresuber_pos_pro_init();
