@@ -16,13 +16,37 @@ class RestController extends WP_REST_Controller {
     public function perm() { return current_user_can('manage_woocommerce'); }
 
     public function get_products($r) {
+        global $wpdb;
+
+        // --- OPTIMASI START ---
+        // 1. Cek modifikasi terakhir di DB untuk validasi cache (Auto-Refresh jika ada update produk)
+        $last_db_mod = $wpdb->get_var("SELECT MAX(post_modified) FROM $wpdb->posts WHERE post_type = 'product' AND post_status = 'publish'");
+        
+        $cache_key = 'kresuber_pos_products_data';
+        $ver_key   = 'kresuber_pos_products_ver';
+        
+        $cached_data = get_transient($cache_key);
+        $cached_ver  = get_transient($ver_key);
+
+        // 2. Jika cache ada & versi DB sama, return data Cache (INSTANT LOAD)
+        if ($cached_data && $cached_ver === $last_db_mod && !isset($r['force'])) {
+            return rest_ensure_response($cached_data);
+        }
+
+        // 3. Jika Cache miss, naikkan resource limit untuk handle ribuan produk
+        if (function_exists('set_time_limit')) set_time_limit(0);
+        if (function_exists('ini_set')) ini_set('memory_limit', '512M');
+
         $products = wc_get_products(['limit' => -1, 'status' => 'publish']);
         $data = [];
         foreach($products as $p) {
+            // Optimasi: Gunakan placeholder jika tidak ada gambar untuk hemat query
             $img = $p->get_image_id() ? wp_get_attachment_image_url($p->get_image_id(), 'medium') : wc_placeholder_img_src();
+            
             $cats = $p->get_category_ids();
             $c_slug = 'lainnya'; $c_name = 'Lainnya';
             if(!empty($cats) && ($t=get_term($cats[0], 'product_cat'))) { $c_slug=$t->slug; $c_name=$t->name; }
+            
             $data[] = [
                 'id'=>$p->get_id(), 'name'=>$p->get_name(), 'price'=>(float)$p->get_price(),
                 'image'=>$img, 'stock'=>$p->get_stock_quantity()??999, 'stock_status'=>$p->get_stock_status(),
@@ -30,6 +54,12 @@ class RestController extends WP_REST_Controller {
                 'category_slug'=>$c_slug, 'category_name'=>$c_name
             ];
         }
+
+        // 4. Simpan Cache (7 hari, tapi akan invalid otomatis jika $last_db_mod berubah)
+        set_transient($cache_key, $data, 7 * DAY_IN_SECONDS);
+        set_transient($ver_key, $last_db_mod, 7 * DAY_IN_SECONDS);
+        // --- OPTIMASI END ---
+
         return rest_ensure_response($data);
     }
 
