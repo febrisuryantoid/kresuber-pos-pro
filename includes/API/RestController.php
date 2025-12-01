@@ -11,18 +11,21 @@ class RestController extends WP_REST_Controller {
         register_rest_route( $this->namespace, '/products', [ 'methods' => 'GET', 'callback' => [ $this, 'get_products' ], 'permission_callback' => [ $this, 'perm' ] ] );
         register_rest_route( $this->namespace, '/orders', [ 'methods' => 'GET', 'callback' => [ $this, 'get_orders' ], 'permission_callback' => [ $this, 'perm' ] ] );
         register_rest_route( $this->namespace, '/order', [ 'methods' => 'POST', 'callback' => [ $this, 'create_order' ], 'permission_callback' => [ $this, 'perm' ] ] );
+        register_rest_route( $this->namespace, '/health', [ 'methods' => 'GET', 'callback' => '__return_true', 'permission_callback' => '__return_true' ] );
     }
 
     public function perm() { return current_user_can('manage_woocommerce'); }
 
     public function get_products($r) {
+        // Limit -1 for FULL SYNC to Local DB
         $products = wc_get_products(['limit' => -1, 'status' => 'publish']);
         $data = [];
         foreach($products as $p) {
             $img = $p->get_image_id() ? wp_get_attachment_image_url($p->get_image_id(), 'medium') : wc_placeholder_img_src();
             $cats = $p->get_category_ids();
-            $c_slug = 'uncategorized'; $c_name = 'Lainnya';
+            $c_slug = 'lainnya'; $c_name = 'Lainnya';
             if(!empty($cats) && ($t=get_term($cats[0], 'product_cat'))) { $c_slug=$t->slug; $c_name=$t->name; }
+            
             $data[] = [
                 'id'=>$p->get_id(), 'name'=>$p->get_name(), 'price'=>(float)$p->get_price(),
                 'image'=>$img, 'stock'=>$p->get_stock_quantity()??999, 'stock_status'=>$p->get_stock_status(),
@@ -34,26 +37,15 @@ class RestController extends WP_REST_Controller {
     }
 
     public function get_orders($r) {
-        // FIX: Return CLEAN DATA structure for Vue to render nicely
-        $orders = wc_get_orders(['limit'=>30, 'orderby'=>'date', 'order'=>'DESC']);
+        $orders = wc_get_orders(['limit'=>20, 'orderby'=>'date', 'order'=>'DESC']);
         $data = [];
         foreach($orders as $o) {
-            $items = [];
-            foreach($o->get_items() as $i) {
-                $items[] = [
-                    'name' => $i->get_name(),
-                    'qty'  => $i->get_quantity()
-                ];
-            }
-            
+            $items = []; foreach($o->get_items() as $i) $items[] = ['name'=>$i->get_name(), 'qty'=>$i->get_quantity()];
             $data[] = [
-                'id' => $o->get_id(),
-                'number' => $o->get_order_number(),
-                'status' => $o->get_status(),
-                'total_formatted' => strip_tags($o->get_formatted_order_total()), // Clean price string
-                'date' => $o->get_date_created()->date('d/m/y H:i'),
-                'customer' => $o->get_formatted_billing_full_name() ?: 'Walk-in',
-                'items' => $items // Send array, not string
+                'id'=>$o->get_id(), 'number'=>$o->get_order_number(), 'status'=>$o->get_status(),
+                'total_formatted'=>strip_tags($o->get_formatted_order_total()), 'date'=>$o->get_date_created()->date('d/m/Y H:i'),
+                'customer'=>$o->get_formatted_billing_full_name() ?: 'Walk-in',
+                'items'=>$items
             ];
         }
         return rest_ensure_response($data);
@@ -64,9 +56,9 @@ class RestController extends WP_REST_Controller {
         try {
             $order = wc_create_order(['customer_id'=>0]);
             foreach($p['items'] as $i) { $prod=wc_get_product(intval($i['id'])); if($prod) $order->add_product($prod, intval($i['qty'])); }
-            $order->set_payment_method($p['payment_method']??'cash');
+            $order->set_billing_first_name('Walk-in'); $order->set_payment_method($p['payment_method']??'cash');
             $order->calculate_totals(); $order->payment_complete();
-            return rest_ensure_response(['success'=>true, 'order_number'=>$order->get_order_number(), 'total'=>$order->get_total(), 'date'=>$order->get_date_created()->date('d/m/y H:i')]);
+            return rest_ensure_response(['success'=>true, 'order_number'=>$order->get_order_number(), 'total'=>$order->get_total()]);
         } catch( \Exception $e ) { return new WP_Error('err', $e->getMessage()); }
     }
 }

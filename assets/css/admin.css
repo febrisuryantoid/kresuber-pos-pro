@@ -1,37 +1,23 @@
 
-.kresuber-wrap { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; max-width: 1140px; margin: 30px auto; color: #1f2937; }
-.kresuber-wrap * { box-sizing: border-box; }
+.kresuber-wrap { font-family: 'Inter', sans-serif; max-width: 1140px; margin: 30px auto; }
 .k-header { background: #fff; padding: 24px 32px; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; border: 1px solid #e5e7eb; }
 .k-brand { display: flex; align-items: center; gap: 16px; }
 .k-logo-icon { width: 48px; height: 48px; background: #eff6ff; color: #2563eb; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
-.k-logo-icon .dashicons { font-size: 24px; width: 24px; height: 24px; }
-.k-brand h1 { margin: 0; font-size: 20px; font-weight: 700; color: #111827; line-height: 1.2; }
-.k-brand p { margin: 2px 0 0; color: #6b7280; font-size: 14px; }
-.k-pill { background: #ecfdf5; color: #059669; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 99px; border: 1px solid #d1fae5; }
-.k-btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; text-decoration: none; transition: all 0.2s; border: 1px solid transparent; cursor: pointer; gap: 8px; }
-.k-btn-primary { background: #2563eb; color: #fff; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
-.k-btn-primary:hover { background: #1d4ed8; color: #fff; transform: translateY(-1px); }
+.k-brand h1 { margin: 0; font-size: 20px; font-weight: 700; color: #111827; }
+.k-pill { background: #ecfdf5; color: #059669; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 99px; }
+.k-btn { display: inline-flex; align-items: center; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none; border: 1px solid transparent; cursor: pointer; }
+.k-btn-primary { background: #2563eb; color: #fff; }
 .k-btn-outline { background: #fff; border-color: #d1d5db; color: #374151; }
-.k-btn-outline:hover { border-color: #9ca3af; background: #f9fafb; }
-.k-btn-sm { padding: 6px 12px; font-size: 12px; }
-.k-link-danger { color: #ef4444; font-size: 12px; text-decoration: underline; background: none; border: none; cursor: pointer; margin-left: 10px; }
 .k-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
 .k-card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.02); margin-bottom: 24px; overflow: hidden; }
 .k-card-head { padding: 20px 24px; border-bottom: 1px solid #f3f4f6; }
-.k-card-head h3 { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
-.k-card-head p { margin: 4px 0 0; color: #6b7280; font-size: 13px; }
+.k-card-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
 .k-card-body { padding: 24px; }
 .k-card-foot { padding: 16px 24px; background: #f9fafb; border-top: 1px solid #f3f4f6; }
 .k-form-group { margin-bottom: 20px; }
-.k-form-group label { display: block; font-weight: 500; color: #374151; margin-bottom: 8px; font-size: 14px; }
-.k-select, .k-textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 14px; outline: none; transition: border 0.2s; }
-.k-select:focus, .k-textarea:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.1); }
-.k-hint { font-size: 12px; color: #9ca3af; margin-top: 6px; }
+.k-select, .k-textarea { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; }
 .k-upload-area { display: flex; align-items: center; gap: 16px; background: #f9fafb; padding: 16px; border-radius: 10px; border: 1px dashed #d1d5db; }
 .k-preview { width: 64px; height: 64px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .k-preview img { width: 100%; height: 100%; object-fit: contain; }
-.k-preview .dashicons { font-size: 24px; color: #d1d5db; }
-.k-row { display: flex; gap: 20px; }
-.k-col { flex: 1; }
+.k-row { display: flex; gap: 20px; } .k-col { flex: 1; }
 .w-full { width: 100%; }
-@media (max-width: 768px) { .k-layout { grid-template-columns: 1fr; } .k-header { flex-direction: column; align-items: flex-start; gap: 15px; } }
