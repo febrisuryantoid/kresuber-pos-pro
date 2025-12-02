@@ -1,3 +1,3 @@
 === Kresuber POS Pro ===
-Stable tag: 1.7.0
-Description: SaaS Style POS System.
+Version: 1.9.3.2
+Performance Update & Loading Bar.

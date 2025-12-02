@@ -1,85 +1,225 @@
 
-const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
-const db = new Dexie("KresuberDB_V4");
-db.version(1).stores({ prod: "id, sku, barcode, cat, search" });
+// Safety Check
+if (typeof Vue === 'undefined') {
+    document.getElementById('static-loader').innerHTML = '<h3 class="text-red-500 text-center font-bold p-10">Gagal memuat VueJS. Cek Koneksi Internet.</h3>';
+    throw new Error("Vue not loaded");
+}
+
+const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+const db = new Dexie("KresuberDB_v1_9_3");
+db.version(1).stores({ products: "id, sku, barcode, category_slug, search_terms" });
+
+// Loader Helper
+const updateLoader = (pct, text) => {
+    const elBar = document.getElementById('loader-bar');
+    const elText = document.getElementById('loader-text');
+    if(elBar) elBar.style.width = pct + '%';
+    if(elText && text) elText.innerText = text + ' ' + pct + '%';
+};
 
 createApp({
     setup() {
-        const config=ref(params.conf||{}), products=ref([]), categories=ref([]), cart=ref([]), recentOrders=ref([]);
-        const curCat=ref('all'), search=ref(''), loading=ref(true), syncing=ref(false), ordersLoading=ref(false);
-        const activeCashier=ref(config.value.cashiers?.[0] || 'Default');
-        const viewMode=ref('pos'), showMobileCart=ref(false), showCart=ref(false), modal=ref(false);
-        const method=ref('cash'), paid=ref(''), processing=ref(false), cashInput=ref(null);
+        const config = ref(wpData.config || {});
+        const products = ref([]), categories = ref([]), cart = ref([]);
+        const loading = ref(true), syncing = ref(false), search = ref(""), curCat = ref("all");
         
-        const total = computed(() => cart.value.reduce((s,i)=>s+(i.price*i.qty),0));
-        const grandTotal = computed(() => total.value);
-        const change = computed(() => (parseInt(paid.value)||0)-grandTotal.value);
-        const quickCash = computed(() => [10000, 20000, 50000, 100000].filter(a => a >= grandTotal.value).slice(0, 3));
-        const cartTotalQty = computed(() => cart.value.reduce((a, i) => a + i.qty, 0));
-        const fmt = (v) => params.curr + ' ' + new Intl.NumberFormat('id-ID').format(v);
+        // Modals & UI
+        const showMobileCart = ref(false), showPaymentModal = ref(false), qrisZoom = ref(false);
+        const showHistory = ref(false), showRegister = ref(false), showScanner = ref(false);
+        const manageMode = ref(false), showProductModal = ref(false);
+        const isProcessing = ref(false), saving = ref(false), activeTab = ref('info');
+        
+        // Transaction Data
+        const historyOrders = ref([]), loadingHistory = ref(false);
+        const registerCash = ref(0), registerResult = ref(null);
+        let html5QrCode = null;
 
-        const sync = async () => {
-            syncing.value=true; loading.value=true;
-            try {
-                const r = await axios.get(`${params.api}/products`, {headers:{'X-WP-Nonce':params.nonce}});
-                const items = r.data.map(p => ({...p, search:`${p.name} ${p.sku} ${p.barcode}`.toLowerCase(), cat:p.category_slug}));
-                const cats = {}; items.forEach(i => cats[i.cat]={slug:i.cat, name:i.category_name});
-                categories.value = Object.values(cats);
-                await db.prod.clear(); await db.prod.bulkAdd(items);
-                find();
-            } catch(e){ alert("Sync Gagal"); } finally { syncing.value=false; loading.value=false; }
-        };
+        // Forms
+        const paymentMethod = ref('cash'), amountPaid = ref('');
+        const debtForm = ref({ name: '', phone: '' });
+        const paymentSuccess = ref(false), lastOrder = ref({});
+        const editingProduct = ref(null);
+        const form = ref({ name:'', price:'', cost_price:'', stock:'', category:'', icon:'', sku:'', barcode:'', unit:'Pcs', image_url:'', image_preview:'', wholesale:[] });
 
-        const find = async () => {
-            let c = db.prod.toCollection();
-            if(curCat.value!=='all') c = db.prod.where('cat').equals(curCat.value);
-            const q = search.value.toLowerCase().trim();
-            if(q) {
-                const ex = await db.prod.where('sku').equals(q).or('barcode').equals(q).first();
-                if(ex) { add(ex); search.value=''; return; }
-                const all = await c.toArray();
-                products.value = all.filter(p => p.search.includes(q)).slice(0, 60);
-            } else { 
-                products.value = await c.limit(60).toArray(); 
-                if(!categories.value.length && products.value.length) {
-                     const all = await db.prod.toArray(); const k = {}; all.forEach(i=>k[i.cat]={slug:i.cat,name:i.category_name}); categories.value=Object.values(k);
+        // --- INIT DATA WITH PROGRESS ---
+        onMounted(async () => {
+            updateLoader(10, "Menyiapkan Database...");
+            await new Promise(r => setTimeout(r, 300)); // Smooth start
+            
+            try { 
+                if((await db.products.count()) === 0) {
+                    await sync(); 
+                } else {
+                    updateLoader(80, "Memuat Data Lokal...");
+                    await findProducts();
+                    updateLoader(100, "Selesai!");
                 }
+            } catch(e) { console.error(e); }
+            
+            setTimeout(() => {
+                const loader = document.getElementById('static-loader');
+                if(loader) {
+                    loader.style.transition = 'opacity 0.5s';
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.style.display = 'none', 500);
+                }
+            }, 800);
+        });
+
+        // --- SYNC WITH PROGRESS BAR ---
+        const sync = async () => {
+            syncing.value = true; loading.value = true;
+            updateLoader(20, "Menghubungkan Server...");
+            
+            try {
+                const res = await axios.get(`${wpData.api}/products`, { 
+                    headers: { 'X-WP-Nonce': wpData.nonce },
+                    onDownloadProgress: (progressEvent) => {
+                        const total = progressEvent.total || (progressEvent.loaded * 1.2); // Fallback estimate
+                        let percent = Math.round((progressEvent.loaded * 100) / total);
+                        // Scale download progress to 20%-80% range
+                        let scaled = 20 + Math.round(percent * 0.6);
+                        updateLoader(scaled, "Mengunduh Produk...");
+                    }
+                });
+
+                updateLoader(85, "Menyimpan Database...");
+                
+                const cleanData = res.data.map(p => ({ 
+                    ...p, 
+                    price: parseFloat(p.price)||0, 
+                    search_terms: `${p.name} ${p.sku} ${p.barcode} ${p.category_name}`.toLowerCase() 
+                }));
+                
+                await db.products.clear(); 
+                await db.products.bulkAdd(cleanData);
+                
+                updateLoader(95, "Finalisasi...");
+                
+                const uniqueCats = [...new Set(cleanData.map(p => p.category_name).filter(c => c && c !== 'Lainnya'))];
+                categories.value = uniqueCats.map(c => ({ name: c, slug: c.toLowerCase().replace(/\s+/g, '-') }));
+                
+                findProducts();
+                updateLoader(100, "Siap!");
+                
+            } catch(e) { 
+                alert("Gagal Sync: " + e.message); 
+            } finally { 
+                syncing.value = false; 
+                loading.value = false; 
             }
         };
 
-        const fetchOrders = async () => {
-            ordersLoading.value = true;
-            try { const r = await axios.get(`${params.api}/orders`, {headers:{'X-WP-Nonce':params.nonce}}); recentOrders.value = r.data; }
-            catch(e){} finally { ordersLoading.value = false; }
+        const findProducts = async () => {
+            let col = db.products.toCollection();
+            if (curCat.value !== 'all') col = db.products.filter(p => p.category_name.toLowerCase().replace(/\s+/g, '-') === curCat.value);
+            const q = search.value.toLowerCase().trim();
+            if (q) { const all = await col.toArray(); products.value = all.filter(p => p.search_terms.includes(q)); } else products.value = await col.limit(100).toArray();
         };
 
-        const add = (p) => { if(p.stock_status==='outofstock') return alert('Habis!'); const i=cart.value.find(x=>x.id===p.id); i?i.qty++:cart.value.push({...p, qty:1}); };
-        const rem = (i) => cart.value = cart.value.filter(x=>x.id!==i.id);
-        const qty = (i,d) => { i.qty+=d; if(i.qty<=0) rem(i); };
-        const clearCart = () => confirm('Hapus?') ? cart.value=[] : null;
-        const toggleHold = () => { /* Placeholder */ };
+        // --- CORE FUNCTIONS ---
+        const getIcon = (p) => {
+            if (p.icon_override) return p.icon_override;
+            const txt = (p.name + ' ' + (p.category_name||'')).toLowerCase();
+            if (txt.includes('kopi')) return 'ri-cup-fill';
+            if (txt.includes('mie')) return 'ri-restaurant-fill';
+            if (txt.includes('top up') || txt.includes('dana')) return 'ri-smartphone-fill';
+            return 'ri-box-3-line';
+        };
 
-        const checkout = async () => {
-            processing.value=true;
+        const getItemPrice = (item) => {
+            if(!item.wholesale || item.wholesale.length === 0) return item.price;
+            const applicableRules = item.wholesale.filter(rule => item.qty >= rule.min);
+            if(applicableRules.length > 0) {
+                applicableRules.sort((a,b) => b.min - a.min);
+                return applicableRules[0].price;
+            }
+            return item.price;
+        };
+
+        const isWholesaleApplied = (item) => getItemPrice(item) < item.price;
+        const cartTotal = computed(() => cart.value.reduce((acc, item) => acc + (getItemPrice(item) * item.qty), 0));
+        const cartTotalQty = computed(() => cart.value.reduce((a,i) => a + i.qty, 0));
+        const changeAmount = computed(() => (parseFloat(amountPaid.value)||0) - cartTotal.value);
+
+        // --- CART ---
+        const add = (p) => { 
+            if(p.stock!==null && p.stock<=0) return alert("Stok Habis!"); 
+            const x = cart.value.find(i=>i.id===p.id); 
+            if(x) x.qty++; else cart.value.push({...p, qty:1}); 
+        };
+        const updateQty = (i,d) => { i.qty+=d; if(i.qty<=0) cart.value = cart.value.filter(x=>x.id!==i.id); };
+        const removeItem = (i) => updateQty(i, -999);
+        const clearCart = () => confirm('Reset keranjang?')?cart.value=[]:null;
+
+        // --- PAYMENT ---
+        const openPayment = () => { paymentSuccess.value=false; showPaymentModal.value=true; };
+        const processPayment = async () => {
+            if (paymentMethod.value === 'debt' && (!debtForm.value.name || !debtForm.value.phone)) return alert("Isi Nama & WA!");
+            isProcessing.value = true;
             try {
-                const pl = { items:cart.value, payment_method:method.value, amount_tendered:paid.value, change:change.value };
-                const r = await axios.post(`${params.api}/order`, pl, {headers:{'X-WP-Nonce':params.nonce}});
-                if(r.data.success) {
-                    cart.value=[]; paid.value=''; modal.value=false; alert("Transaksi Sukses #" + r.data.order_number);
-                }
-            } catch(e){ alert("Gagal: "+e.message); } finally { processing.value=false; }
+                const itemsPayload = cart.value.map(i => ({ id: i.id, qty: i.qty, price: getItemPrice(i) }));
+                const payload = { items: itemsPayload, payment_method: paymentMethod.value, debt_name: debtForm.value.name, debt_phone: debtForm.value.phone };
+                const res = await axios.post(`${wpData.api}/order`, payload, { headers: { 'X-WP-Nonce': wpData.nonce } });
+                if(res.data.success) { lastOrder.value = res.data; paymentSuccess.value = true; cart.value=[]; debtForm.value={name:'',phone:''}; }
+            } catch(e) { alert("Gagal Transaksi: " + e.message); } finally { isProcessing.value = false; }
+        };
+        const resetPayment = () => { showPaymentModal.value = false; paymentSuccess.value = false; };
+        const generateWALink = (order) => {
+            if(!order || !order.total) return '#';
+            let text = `*STRUK BELANJA ${config.value.site_name}*%0A` + `No: #${order.order_number}%0ATotal: *${formatRupiah(order.total)}*%0A` + `Terima Kasih!`;
+            let phone = debtForm.value.phone || ''; if(phone.startsWith('0')) phone = '62' + phone.slice(1);
+            return `https://wa.me/${phone}?text=${text}`;
         };
 
-        const setCategory = (s) => { curCat.value=s; find(); };
+        // --- REGISTER ---
+        const openRegister = () => { registerCash.value=0; registerResult.value=null; showRegister.value=true; };
+        const closeRegister = async () => {
+            try { const res = await axios.post(`${wpData.api}/close-register`, { actual_cash: registerCash.value }, { headers: { 'X-WP-Nonce': wpData.nonce } }); registerResult.value = res.data; } catch(e) { alert("Error"); }
+        };
 
-        onMounted(async () => {
-            try { if((await db.prod.count())===0) await sync(); else await find(); } catch(e) { console.error(e); }
-            window.addEventListener('keydown', e => { if(e.key==='F3'){ e.preventDefault(); document.querySelector('input[type=text]')?.focus(); } });
-        });
+        // --- HISTORY ---
+        const openHistory = async () => {
+            showHistory.value = true; loadingHistory.value = true;
+            try { const res = await axios.get(`${wpData.api}/orders`, { headers: { 'X-WP-Nonce': wpData.nonce } }); historyOrders.value = res.data; } catch(e) {} finally { loadingHistory.value = false; }
+        };
+        const payDebt = async (order) => {
+            const amount = prompt(`Sisa Hutang: ${formatRupiah(order.debt_remaining)}\nMasukkan jumlah bayar:`);
+            if(!amount) return;
+            try { const res = await axios.post(`${wpData.api}/pay-debt`, { order_id: order.id, amount: amount }, { headers: { 'X-WP-Nonce': wpData.nonce } }); if(res.data.success) { alert("Lunas/Terbayar!"); openHistory(); } } catch(e) { alert("Gagal"); }
+        };
 
-        watch([search, curCat], find);
-        watch(modal, (v) => { if(v && method.value==='cash') nextTick(()=>cashInput.value?.focus()); });
+        // --- CRUD ---
+        const handleImageUpload = async (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            form.value.image_preview = URL.createObjectURL(file); saving.value = true;
+            try {
+                const formData = new FormData(); formData.append('file', file);
+                const res = await axios.post(`${wpData.api}/upload`, formData, { headers: { 'X-WP-Nonce': wpData.nonce, 'Content-Type': 'multipart/form-data' } });
+                if(res.data.success) { form.value.image_url = res.data.url; form.value.image_preview = res.data.url; }
+            } catch(e) { alert("Upload fail"); } finally { saving.value=false; }
+        };
+        const openProductModal = () => { editingProduct.value = null; activeTab.value='info'; form.value = { name:'', price:'', cost_price:'', stock:'', category:'', icon:'', sku:'', barcode:'', unit:'Pcs', wholesale:[] }; showProductModal.value = true; };
+        const handleProductClick = (p) => { if(manageMode.value) { editingProduct.value = p; form.value = { ...p, image_preview: p.image||'', wholesale: p.wholesale || [] }; showProductModal.value = true; } else add(p); };
+        const saveProduct = async () => {
+            saving.value = true;
+            try {
+                const payload = { ...form.value, id: editingProduct.value ? editingProduct.value.id : 0 };
+                const res = await axios.post(`${wpData.api}/product`, payload, { headers: { 'X-WP-Nonce': wpData.nonce } });
+                if(res.data.success) { await sync(); showProductModal.value=false; }
+            } catch(e) { alert("Err"); } finally { saving.value=false; }
+        };
+        const deleteProduct = async () => { if(!confirm("Hapus?")) return; try { await axios.delete(`${wpData.api}/product/${editingProduct.value.id}`, { headers: { 'X-WP-Nonce': wpData.nonce } }); await sync(); showProductModal.value=false; } catch(e) { alert("Gagal"); } };
 
-        return { config, products, categories, cart, recentOrders, curCat, search, loading, syncing, ordersLoading, viewMode, activeCashier, showMobileCart, showCart, modal, method, paid, processing, cashInput, grandTotal, change, quickCash, cartTotalQty, fmt, sync, setCategory, fetchOrders, add, rem, qty, clearCart, toggleHold, setView:(m)=>{viewMode.value=m; if(m==='orders')fetchOrders();}, openPayModal:()=>modal.value=true, checkout };
+        // --- SCANNER ---
+        const openScanner = () => { showScanner.value=true; nextTick(() => { html5QrCode = new Html5Qrcode("qr-reader"); html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => { html5QrCode.stop(); showScanner.value=false; handleScannedCode(txt); }, (e)=>{}); }); };
+        const closeScanner = () => { if(html5QrCode) html5QrCode.stop(); showScanner.value=false; };
+        const handleScannedCode = async (code) => { const p = await db.products.where('barcode').equals(code).or('sku').equals(code).first(); if(p) { add(p); alert("Found: "+p.name); } else if(confirm("Kode baru. Tambah?")) { openProductModal(); form.value.barcode=code; form.value.sku=code; } };
+        const formatRupiah = (n) => 'Rp ' + new Intl.NumberFormat('id-ID').format(n || 0);
+
+        watch([search, curCat], findProducts);
+
+        return { config, products, categories, cart, loading, syncing, search, curCat, showMobileCart, showPaymentModal, manageMode, showProductModal, isProcessing, saving, paymentMethod, amountPaid, editingProduct, form, cartTotal, changeAmount, cartTotalQty, debtForm, qrisZoom, showScanner, showHistory, historyOrders, loadingHistory, registerCash, showRegister, registerResult, paymentSuccess, lastOrder, activeTab,
+        getIcon, handleProductClick, openProductModal, closeProductModal as closeProductModal, saveProduct, sync, setCategory: (s)=>{curCat.value=s}, add, updateQty, removeItem, clearCart, openPayment, processPayment, formatRupiah, handleImageUpload, openScanner, closeScanner, openHistory, payDebt, openRegister, closeRegister, resetPayment, generateWALink, getItemPrice, isWholesaleApplied, deleteProduct };
     }
 }).mount('#app');
