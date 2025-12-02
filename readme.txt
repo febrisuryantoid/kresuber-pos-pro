@@ -1,3 +1,3 @@
 === Kresuber POS Pro ===
-Version: 1.9.3.2
-Performance Update & Loading Bar.
+Stable tag: 1.8.1
+Major Update: UI Overhaul, Calculation Fix, & Progress Bar Loading.

@@ -10,7 +10,11 @@ class UI {
         if ( get_query_var( 'kresuber_pos' ) == 1 ) {
             if ( ! is_user_logged_in() || ! current_user_can('manage_woocommerce') ) { auth_redirect(); exit; }
             
-            $colors = ['retail'=>'#10B981','blue'=>'#3B82F6','sunset'=>'#F97316','dark'=>'#1F2937','pink'=>'#EC4899','purple'=>'#8B5CF6'];
+            // Tema Definisi (Server Side config)
+            $colors = [
+                'retail' => '#10B981', 'blue' => '#3B82F6', 'sunset' => '#F97316', 
+                'dark' => '#1F2937', 'pink' => '#EC4899'
+            ];
             $theme_key = get_option( 'kresuber_pos_theme', 'retail' );
             
             global $kresuber_config;
@@ -18,7 +22,7 @@ class UI {
                 'logo' => get_option('kresuber_pos_logo', ''),
                 'qris' => get_option('kresuber_qris_image', ''),
                 'printer_width' => get_option('kresuber_printer_width', '58mm'),
-                'cashiers' => json_decode(get_option('kresuber_cashiers', '["Admin"]')) ?: ['Admin'],
+                'cashiers' => json_decode(get_option('kresuber_cashiers', '["Admin"]')),
                 'address' => get_option('kresuber_store_address', ''),
                 'theme_color' => $colors[$theme_key] ?? '#10B981',
                 'site_name' => get_bloginfo('name')

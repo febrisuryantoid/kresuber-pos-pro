@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       [v1.9.3.2] POS Warung Edition. Fitur: Loading Progress Bar (%), Optimasi Kecepatan, Harga Grosir, Struk WA.
- * Version:           1.9.3.2
+ * Description:       [v1.8.1] Sistem Kasir Modern. Update: Loading Screen Informatif (Progress Bar), UX Optimization.
+ * Version:           1.8.1
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
@@ -13,38 +13,26 @@
 
 namespace Kresuber\POS_Pro;
 
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
+if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'KRESUBER_POS_PRO_VERSION', '1.9.3.2' );
+define( 'KRESUBER_POS_PRO_VERSION', '1.8.1' );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
-// Autoloader
+// Autoloader Sederhana
 spl_autoload_register( function ( $class ) {
     $prefix = 'Kresuber\\POS_Pro\\';
     $base_dir = KRESUBER_POS_PRO_PATH . 'includes/';
     $len = strlen( $prefix );
-    if ( strncmp( $prefix, $class, $len ) !== 0 ) {
-        return;
-    }
+    if ( strncmp( $prefix, $class, $len ) !== 0 ) return;
     $relative_class = substr( $class, $len );
     $file = $base_dir . str_replace( '\\', '/', $relative_class ) . '.php';
-    if ( file_exists( $file ) ) {
-        require $file;
-    }
+    if ( file_exists( $file ) ) require $file;
 } );
 
 class Main {
     private static $instance = null;
-    
-    public static function instance() {
-        if ( is_null( self::$instance ) ) {
-            self::$instance = new self();
-        }
-        return self::$instance;
-    }
+    public static function instance() { if ( is_null( self::$instance ) ) self::$instance = new self(); return self::$instance; }
 
     public function __construct() {
         add_action( 'plugins_loaded', [ $this, 'load_i18n' ] );
@@ -56,14 +44,17 @@ class Main {
     }
 
     private function init_hooks() {
+        // Admin
         $admin = new Admin\Admin();
         add_action( 'admin_menu', [ $admin, 'register_menu' ] );
         add_action( 'admin_enqueue_scripts', [ $admin, 'enqueue_styles' ] );
         add_action( 'admin_init', [ $admin, 'register_settings' ] );
 
+        // API
         $api = new API\RestController();
         add_action( 'rest_api_init', [ $api, 'register_routes' ] );
 
+        // Frontend App
         $ui = new Frontend\UI();
         add_action( 'init', [ $ui, 'add_rewrite_rules' ] );
         add_filter( 'query_vars', [ $ui, 'add_query_vars' ] );
@@ -71,10 +62,9 @@ class Main {
     }
 }
 
+// Hooks Aktivasi
 register_activation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Activator', 'activate' ] );
 register_deactivation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Deactivator', 'deactivate' ] );
 
-function kresuber_pos_pro_init() {
-    return Main::instance();
-}
+function kresuber_pos_pro_init() { return Main::instance(); }
 kresuber_pos_pro_init();
