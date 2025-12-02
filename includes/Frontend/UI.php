@@ -10,11 +10,7 @@ class UI {
         if ( get_query_var( 'kresuber_pos' ) == 1 ) {
             if ( ! is_user_logged_in() || ! current_user_can('manage_woocommerce') ) { auth_redirect(); exit; }
             
-            // Tema Definisi (Server Side config)
-            $colors = [
-                'retail' => '#10B981', 'blue' => '#3B82F6', 'sunset' => '#F97316', 
-                'dark' => '#1F2937', 'pink' => '#EC4899'
-            ];
+            $colors = ['retail'=>'#10B981','blue'=>'#3B82F6','sunset'=>'#F97316','dark'=>'#1F2937','pink'=>'#EC4899','purple'=>'#8B5CF6'];
             $theme_key = get_option( 'kresuber_pos_theme', 'retail' );
             
             global $kresuber_config;

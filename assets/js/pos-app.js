@@ -1,279 +1,239 @@
-const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
 
-// Database Lokal (Dexie)
-const db = new Dexie("KresuberDB_v1_8");
-db.version(1).stores({ 
-    products: "id, sku, barcode, category_slug, search_terms" 
-});
+const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+const db = new Dexie("KresuberDB_v1_9");
+db.version(1).stores({ products: "id, sku, barcode, category_slug, search_terms" });
 
 createApp({
     setup() {
-        // --- State ---
         const config = ref(wpData.config || {});
-        const products = ref([]);
-        const categories = ref([]);
-        const cart = ref([]);
+        const products = ref([]), categories = ref([]), cart = ref([]);
+        const loading = ref(true), syncing = ref(false), search = ref(""), curCat = ref("all");
+        const showMobileCart = ref(false), showPaymentModal = ref(false), qrisZoom = ref(false);
+        const showHistory = ref(false), historyOrders = ref([]), loadingHistory = ref(false);
+        const manageMode = ref(false), showProductModal = ref(false), isProcessing = ref(false), saving = ref(false);
+        const showScanner = ref(false);
+        let html5QrCode = null;
+
+        // Payment
+        const paymentMethod = ref('cash'), amountPaid = ref('');
+        const debtForm = ref({ name: '', phone: '' });
         
-        // UI State
-        const loading = ref(true);
-        const loadingText = ref("Menyiapkan Aplikasi..."); // New UX
-        const loadingProgress = ref(0); // New UX (0-100)
-        const syncing = ref(false);
-        const search = ref("");
-        const curCat = ref("all");
-        const showMobileCart = ref(false);
-        const showPaymentModal = ref(false);
-        const isProcessing = ref(false);
-        
-        // Payment State
-        const paymentMethod = ref('cash');
-        const amountPaid = ref('');
-        const cashInputRef = ref(null);
+        // Edit Form
+        const editingProduct = ref(null);
+        const form = ref({ name:'', price:'', cost_price:'', stock:'', category:'', icon:'', sku:'', barcode:'', image_url:'', image_preview:'' });
 
-        // --- Computed Logic ---
-        const cartTotal = computed(() => {
-            return cart.value.reduce((acc, item) => {
-                const price = parseFloat(item.price) || 0;
-                const qty = parseInt(item.qty) || 1;
-                return acc + (price * qty);
-            }, 0);
-        });
+        // --- UPLOAD IMAGE LOGIC (Compress & Square) ---
+        const handleImageUpload = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
 
-        const changeAmount = computed(() => {
-            const paid = parseFloat(amountPaid.value) || 0;
-            return paid - cartTotal.value;
-        });
-
-        const quickCashAmounts = computed(() => {
-            const total = cartTotal.value;
-            const suggestions = [10000, 20000, 50000, 100000];
-            return suggestions.filter(amt => amt >= total).slice(0, 3);
-        });
-
-        const cartTotalQty = computed(() => cart.value.reduce((acc, i) => acc + (parseInt(i.qty)||0), 0));
-
-        // --- Helpers ---
-        const formatRupiah = (val) => {
-            const num = parseFloat(val);
-            if(isNaN(num)) return "Rp 0";
-            return "Rp " + new Intl.NumberFormat('id-ID').format(num);
+            // Preview local first
+            form.value.image_preview = URL.createObjectURL(file);
+            
+            // Compress logic
+            saving.value = true;
+            try {
+                const compressedBlob = await compressImage(file);
+                const formData = new FormData();
+                formData.append('file', compressedBlob, 'prod-' + Date.now() + '.jpg');
+                
+                const res = await axios.post(`${wpData.api}/upload`, formData, {
+                    headers: { 'X-WP-Nonce': wpData.nonce, 'Content-Type': 'multipart/form-data' }
+                });
+                
+                if (res.data.success) {
+                    form.value.image_url = res.data.url;
+                    form.value.image_preview = res.data.url;
+                }
+            } catch(err) {
+                alert("Gagal upload gambar: " + err.message);
+            } finally { saving.value = false; }
         };
 
-        // --- Core Functions ---
+        const compressImage = (file) => {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const size = 600; // Resize to 600px square
+                    canvas.width = size;
+                    canvas.height = size;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fillRect(0, 0, size, size); // White bg
 
-        const forceSync = async () => {
-            if(confirm('Unduh ulang semua data produk dari server?')) {
-                await sync();
+                    // Calculate crop
+                    const minDim = Math.min(img.width, img.height);
+                    const sx = (img.width - minDim) / 2;
+                    const sy = (img.height - minDim) / 2;
+                    
+                    ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+                    canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.8);
+                };
+                img.onerror = reject;
+            });
+        };
+
+        // --- SCANNER LOGIC ---
+        const openScanner = () => {
+            showScanner.value = true;
+            nextTick(() => {
+                html5QrCode = new Html5Qrcode("qr-reader");
+                html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 },
+                    (decodedText) => {
+                        // Success
+                        html5QrCode.stop().then(() => {
+                            showScanner.value = false;
+                            handleScannedCode(decodedText);
+                        });
+                    },
+                    (error) => {}
+                );
+            });
+        };
+
+        const closeScanner = () => {
+            if(html5QrCode) html5QrCode.stop().then(()=>showScanner.value=false);
+            else showScanner.value=false;
+        };
+
+        const handleScannedCode = async (code) => {
+            // Cek di DB
+            const p = await db.products.where('barcode').equals(code).or('sku').equals(code).first();
+            if (p) {
+                add(p);
+                alert(`Produk Ditemukan: ${p.name}`);
+            } else {
+                if(confirm(`Kode ${code} belum terdaftar. Tambah produk baru?`)) {
+                    openProductModal();
+                    form.value.barcode = code;
+                    form.value.sku = code;
+                }
             }
+        };
+
+        // --- HISTORY ---
+        const openHistory = async () => {
+            showHistory.value = true;
+            loadingHistory.value = true;
+            try {
+                const res = await axios.get(`${wpData.api}/orders`, { headers: { 'X-WP-Nonce': wpData.nonce } });
+                historyOrders.value = res.data;
+            } catch(e) { alert("Gagal ambil data history"); }
+            finally { loadingHistory.value = false; }
+        };
+
+        // --- CRUD & ICONS ---
+        const getIcon = (p) => {
+            if (p.icon_override) return p.icon_override;
+            const txt = (p.name + ' ' + (p.category_name||'')).toLowerCase();
+            if (txt.includes('transfer') || txt.includes('dana') || txt.includes('ovo')) return 'ri-wallet-3-fill';
+            if (txt.includes('pln') || txt.includes('token') || txt.includes('listrik')) return 'ri-flashlight-fill';
+            if (txt.includes('kopi') || txt.includes('minum')) return 'ri-cup-fill';
+            return 'ri-box-3-line';
+        };
+
+        const handleProductClick = (p) => {
+            if (manageMode.value) {
+                editingProduct.value = p;
+                form.value = { ...p, image_preview: p.image || '', image_url: p.image || '' };
+                showProductModal.value = true;
+            } else add(p);
+        };
+
+        const openProductModal = () => {
+            editingProduct.value = null;
+            form.value = { name:'', price:'', cost_price:'', stock:'', category:'', icon:'', sku:'', barcode:'', image_url:'', image_preview:'' };
+            showProductModal.value = true;
+        };
+        const closeProductModal = () => showProductModal.value = false;
+
+        const saveProduct = async () => {
+            if(!form.value.name || !form.value.price) return alert("Nama dan Harga wajib diisi!");
+            saving.value = true;
+            try {
+                const payload = { ...form.value, id: editingProduct.value ? editingProduct.value.id : 0 };
+                const res = await axios.post(`${wpData.api}/product`, payload, { headers: { 'X-WP-Nonce': wpData.nonce } });
+                if(res.data.success) { await sync(); closeProductModal(); alert("Produk tersimpan!"); }
+            } catch(e) { alert("Gagal: "+e.message); } finally { saving.value = false; }
+        };
+
+        const deleteProduct = async () => {
+            if(!confirm("Hapus permanen?")) return;
+            try {
+                await axios.delete(`${wpData.api}/product/${editingProduct.value.id}`, { headers: { 'X-WP-Nonce': wpData.nonce } });
+                await sync(); closeProductModal();
+            } catch(e) { alert("Gagal"); }
         };
 
         const sync = async () => {
-            syncing.value = true;
-            loading.value = true;
-            loadingProgress.value = 5;
-            loadingText.value = "Menghubungkan ke Server...";
-
+            syncing.value = true; loading.value = true;
             try {
-                // Fetch dari API dengan Progress Monitor
-                const res = await axios.get(`${wpData.api}/products`, {
-                    headers: { 'X-WP-Nonce': wpData.nonce },
-                    onDownloadProgress: (progressEvent) => {
-                        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-                        // Progress 5% -> 80% (Download Phase)
-                        loadingProgress.value = 5 + (percentCompleted * 0.75); 
-                        loadingText.value = `Mengunduh Data Produk (${percentCompleted}%)...`;
-                    }
-                });
-
-                loadingProgress.value = 80;
-                loadingText.value = "Memproses Database Lokal...";
-                
-                // Beri sedikit jeda agar UI sempat render text baru
-                await new Promise(r => setTimeout(r, 100));
-
-                const rawData = res.data;
-                const cleanData = [];
-                const catMap = {};
-
-                // Proses Data & Simpan Kategori
-                rawData.forEach(p => {
-                    const price = parseFloat(p.price) || 0;
-                    if(p.category_slug && p.category_slug !== 'uncategorized') {
-                        catMap[p.category_slug] = { slug: p.category_slug, name: p.category_name };
-                    }
-                    cleanData.push({
-                        ...p,
-                        price: price,
-                        search_terms: `${p.name} ${p.sku} ${p.barcode}`.toLowerCase()
-                    });
-                });
-
-                // Simpan ke DB
-                await db.products.clear();
-                loadingProgress.value = 90;
-                loadingText.value = "Menyimpan Produk...";
-                
-                await db.products.bulkAdd(cleanData);
-                
-                // Set Kategori di Memory
-                categories.value = Object.values(catMap);
-                
-                loadingProgress.value = 100;
-                loadingText.value = "Selesai!";
-                
-                // Jeda sebentar di 100% sebelum hilang
-                await new Promise(r => setTimeout(r, 500));
-                
-                // Refresh View
-                await findProducts();
-                
-            } catch (err) {
-                console.error(err);
-                alert("Gagal sinkronisasi data: " + err.message);
-            } finally {
-                syncing.value = false;
-                loading.value = false;
-            }
+                const res = await axios.get(`${wpData.api}/products`, { headers: { 'X-WP-Nonce': wpData.nonce } });
+                const cleanData = res.data.map(p => ({
+                    ...p, price: parseFloat(p.price)||0,
+                    search_terms: `${p.name} ${p.sku} ${p.barcode} ${p.category_name}`.toLowerCase()
+                }));
+                await db.products.clear(); await db.products.bulkAdd(cleanData);
+                const uniqueCats = [...new Set(cleanData.map(p => p.category_name).filter(c => c && c !== 'Lainnya'))];
+                categories.value = uniqueCats.map(c => ({ name: c, slug: c.toLowerCase().replace(/\s+/g, '-') }));
+                findProducts();
+            } catch(e) { console.error(e); } finally { syncing.value = false; loading.value = false; }
         };
 
         const findProducts = async () => {
-            let collection = db.products.toCollection();
-            
-            if (curCat.value !== 'all') {
-                collection = db.products.where('category_slug').equals(curCat.value);
-            }
-
+            let col = db.products.toCollection();
+            if (curCat.value !== 'all') col = db.products.filter(p => p.category_name.toLowerCase().replace(/\s+/g, '-') === curCat.value);
             const q = search.value.toLowerCase().trim();
             if (q) {
-                const exact = await db.products.where('sku').equals(q).or('barcode').equals(q).first();
-                if (exact) {
-                    add(exact);
-                    search.value = "";
-                    return; 
-                }
-                const all = await collection.toArray();
+                const all = await col.toArray();
                 products.value = all.filter(p => p.search_terms.includes(q));
-            } else {
-                products.value = await collection.limit(100).toArray();
-                
-                if (categories.value.length === 0) {
-                    const allP = await db.products.toArray();
-                    const cMap = {};
-                    allP.forEach(p => {
-                        if(p.category_slug && p.category_slug !== 'uncategorized') 
-                             cMap[p.category_slug] = {slug:p.category_slug, name:p.category_name};
-                    });
-                    categories.value = Object.values(cMap);
-                }
-            }
+            } else products.value = await col.limit(100).toArray();
         };
 
-        const setCategory = (slug) => {
-            curCat.value = slug;
-            findProducts();
+        const cartTotal = computed(() => cart.value.reduce((a,i) => a + (parseFloat(i.price)*i.qty), 0));
+        const changeAmount = computed(() => (parseFloat(amountPaid.value)||0) - cartTotal.value);
+        const cartTotalQty = computed(() => cart.value.reduce((a,i) => a + i.qty, 0));
+        const add = (p) => { 
+            if(p.stock!==null && p.stock<=0) return alert("Habis!"); 
+            const x = cart.value.find(i=>i.id===p.id); x?x.qty++:cart.value.push({...p, qty:1}); 
         };
-
-        // --- Cart Functions ---
-        const add = (product) => {
-            if(product.stock_status === 'outofstock') {
-                alert("Stok Habis!");
-                return;
-            }
-            const existing = cart.value.find(i => i.id === product.id);
-            if (existing) {
-                existing.qty++;
-            } else {
-                cart.value.push({
-                    id: product.id,
-                    name: product.name,
-                    price: parseFloat(product.price),
-                    image: product.image,
-                    qty: 1
-                });
-            }
-        };
-
-        const updateQty = (item, delta) => {
-            item.qty += delta;
-            if (item.qty <= 0) removeItem(item);
-        };
-
-        const removeItem = (item) => {
-            cart.value = cart.value.filter(i => i.id !== item.id);
-        };
-
-        const clearCart = () => {
-            if(confirm('Kosongkan keranjang?')) cart.value = [];
-        };
-
-        // --- Payment Functions ---
-        const openPayment = () => {
-            showPaymentModal.value = true;
-            paymentMethod.value = 'cash';
-            amountPaid.value = '';
-        };
+        const updateQty = (i,d) => { i.qty+=d; if(i.qty<=0) cart.value = cart.value.filter(x=>x.id!==i.id); };
+        const clearCart = () => confirm('Reset?')?cart.value=[]:null;
 
         const processPayment = async () => {
+            // Validasi Hutang
+            if (paymentMethod.value === 'debt') {
+                if (!debtForm.value.name || !debtForm.value.phone) return alert("Nama dan No WA wajib diisi untuk hutang!");
+            }
+            // Konfirmasi Pembayaran
+            if (paymentMethod.value !== 'debt') {
+                if (!confirm("Apakah pembayaran sudah diterima dengan benar?")) return;
+            }
+
             isProcessing.value = true;
             try {
-                const payload = {
-                    items: cart.value.map(i => ({ id: i.id, qty: i.qty })),
+                const payload = { 
+                    items: cart.value.map(i=>({id:i.id, qty:i.qty})), 
                     payment_method: paymentMethod.value,
-                    amount_tendered: paymentMethod.value === 'cash' ? amountPaid.value : cartTotal.value,
-                    change: paymentMethod.value === 'cash' ? changeAmount.value : 0
+                    debt_name: debtForm.value.name,
+                    debt_phone: debtForm.value.phone
                 };
-
-                const res = await axios.post(`${wpData.api}/order`, payload, {
-                    headers: { 'X-WP-Nonce': wpData.nonce }
-                });
-
-                if (res.data.success) {
-                    alert(`Transaksi Berhasil!\nNo Order: #${res.data.order_number}\nTotal: ${formatRupiah(res.data.total)}`);
-                    cart.value = [];
-                    showPaymentModal.value = false;
-                    showMobileCart.value = false;
+                const res = await axios.post(`${wpData.api}/order`, payload, { headers: { 'X-WP-Nonce': wpData.nonce } });
+                if(res.data.success) { 
+                    alert("Sukses! Ref: "+res.data.order_number); 
+                    cart.value=[]; showPaymentModal.value=false; debtForm.value={name:'',phone:''};
                 }
-
-            } catch (err) {
-                alert("Gagal memproses transaksi: " + (err.response?.data?.message || err.message));
-            } finally {
-                isProcessing.value = false;
-            }
+            } catch(e) { alert("Error"); } finally { isProcessing.value = false; }
         };
 
-        // --- Lifecycle ---
+        const formatRupiah = (n) => 'Rp ' + new Intl.NumberFormat('id-ID').format(n);
+        
         watch([search, curCat], findProducts);
-        watch(showPaymentModal, (val) => {
-            if(val && paymentMethod.value === 'cash') {
-                nextTick(() => cashInputRef.value?.focus());
-            }
-        });
+        onMounted(async () => { if((await db.products.count())===0) await sync(); else await findProducts(); });
 
-        onMounted(async () => {
-            const count = await db.products.count();
-            if (count === 0) {
-                await sync();
-            } else {
-                loadingProgress.value = 100;
-                // Simulasi loading sebentar agar transisi tidak kasar
-                setTimeout(() => { loading.value = false; }, 500);
-                await findProducts();
-            }
-            
-            window.addEventListener('keydown', e => {
-                if(e.key === 'F3') { e.preventDefault(); document.querySelector('input[type=text]')?.focus(); }
-            });
-        });
-
-        return {
-            config, products, categories, cart, 
-            loading, loadingText, loadingProgress, syncing, search, curCat, showMobileCart, showPaymentModal, isProcessing,
-            paymentMethod, amountPaid, cashInputRef,
-            // Computed
-            cartTotal, changeAmount, quickCashAmounts, cartTotalQty,
-            // Methods
-            formatRupiah, forceSync, setCategory, add, updateQty, removeItem, clearCart,
-            openPayment, processPayment
-        };
+        return { config, products, categories, cart, loading, syncing, search, curCat, showMobileCart, showPaymentModal, manageMode, showProductModal, isProcessing, saving, paymentMethod, amountPaid, editingProduct, form, cartTotal, changeAmount, cartTotalQty, debtForm, qrisZoom, showScanner, showHistory, historyOrders, loadingHistory,
+        getIcon, handleProductClick, openProductModal, closeProductModal, saveProduct, deleteProduct, sync, setCategory: (s)=>{curCat.value=s}, add, updateQty, removeItem:(i)=>updateQty(i, -999), clearCart, openPayment:()=>showPaymentModal.value=true, processPayment, formatRupiah, handleImageUpload, openScanner, closeScanner, openHistory };
     }
 }).mount('#app');

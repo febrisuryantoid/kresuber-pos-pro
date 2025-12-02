@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Kresuber POS Pro
  * Plugin URI:        https://toko.kresuber.co.id/
- * Description:       [v1.8.1] Sistem Kasir Modern. Update: Loading Screen Informatif (Progress Bar), UX Optimization.
- * Version:           1.8.1
+ * Description:       [v1.9.2] POS Enterprise. Fitur: Scan Barcode Kamera, Upload Foto (Auto-Crop), Catat Hutang, History Transaksi.
+ * Version:           1.9.2
  * Author:            Febri Suryanto
  * Author URI:        https://febrisuryanto.com/
  * License:           GPL-2.0+
@@ -15,7 +15,7 @@ namespace Kresuber\POS_Pro;
 
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-define( 'KRESUBER_POS_PRO_VERSION', '1.8.1' );
+define( 'KRESUBER_POS_PRO_VERSION', '1.9.2' );
 define( 'KRESUBER_POS_PRO_PATH', plugin_dir_path( __FILE__ ) );
 define( 'KRESUBER_POS_PRO_URL', plugin_dir_url( __FILE__ ) );
 
@@ -44,17 +44,14 @@ class Main {
     }
 
     private function init_hooks() {
-        // Admin
         $admin = new Admin\Admin();
         add_action( 'admin_menu', [ $admin, 'register_menu' ] );
         add_action( 'admin_enqueue_scripts', [ $admin, 'enqueue_styles' ] );
         add_action( 'admin_init', [ $admin, 'register_settings' ] );
 
-        // API
         $api = new API\RestController();
         add_action( 'rest_api_init', [ $api, 'register_routes' ] );
 
-        // Frontend App
         $ui = new Frontend\UI();
         add_action( 'init', [ $ui, 'add_rewrite_rules' ] );
         add_filter( 'query_vars', [ $ui, 'add_query_vars' ] );
@@ -62,7 +59,6 @@ class Main {
     }
 }
 
-// Hooks Aktivasi
 register_activation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Activator', 'activate' ] );
 register_deactivation_hook( __FILE__, [ 'Kresuber\\POS_Pro\\Core\\Deactivator', 'deactivate' ] );
 
